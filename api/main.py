@@ -2,6 +2,7 @@
 SamiX FastAPI Backend — Main Application
 
 Endpoints:
+  GET  /              → root check (Fixes Render 404)
   GET  /health       → system status
   POST /audit        → full audit pipeline (upload audio → STT → Summarize → RAG → Score)
   POST /rag/query    → query the knowledge base
@@ -95,6 +96,15 @@ def _transcript_to_text(turns) -> str:
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
+
+@app.get("/")
+async def root():
+    """Root endpoint to pass Render's default health check."""
+    return {
+        "status": "online",
+        "message": "SamiX API is running",
+        "docs": "/docs"
+    }
 
 @app.get("/health", response_model=HealthResponse)
 async def health():
