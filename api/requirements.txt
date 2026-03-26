@@ -1,28 +1,36 @@
-# ── SamiX  Backend ──
+# ── SamiX FastAPI Backend ──
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-python-multipart>=0.0.7
 
-# AI & Language Models (Cloud APIs)
+# AI & Language Models
 groq>=0.9.0
-deepgram-sdk>=3.2.0
 
-# Audio Handling
+# Speech-to-Text
+deepgram-sdk>=3.2.0
+openai-whisper>=20231117
+
+# Audio
 pydub>=0.25.1
 
-# RAG & Orchestration (API-based)
+# RAG Stack
 langchain>=0.2.5
 langchain-community>=0.2.5
 langchain-text-splitters>=0.2.2
-# Remove sentence-transformers & huggingface (use Cloud Embeddings instead)
-
-# Vector DB (Cloud or Lightweight)
+langchain-huggingface>=0.0.3
+sentence-transformers>=3.0.0
 pymilvus>=2.5.3
+langchain-milvus>=0.1.7
+pymilvus[milvus_lite]
+rank_bm25>=0.2.2
 
-# Data & Utilities
+# Document Parsing
+pypdf>=4.2.0
+
+# Data Processing
 pandas>=2.2.0
 numpy>=1.26.0
+
+# Utilities
 python-dotenv>=1.0.1
 httpx>=0.27.0
-
-streamlit
+python-multipart>=0.0.7
