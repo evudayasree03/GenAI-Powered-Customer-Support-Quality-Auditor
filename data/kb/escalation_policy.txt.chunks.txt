@@ -1,0 +1,30 @@
+Escalation Policy
+
+1. When to Escalate
+- Issues should be escalated if:
+  - The customer is highly dissatisfied or angry.
+  - The issue remains unresolved after 48 hours.
+  - The request falls outside the agent's authority.
+
+2. Escalation Levels
+- Level 1: Supervisor review
+- Level 2: Manager intervention
+- Level 3: Specialized support team
+
+3. Escalation Process
+- Clearly document the issue before escalation.
+- Provide all relevant customer interaction history.
+---CHUNK---
+- Inform the customer that the issue is being escalated.
+
+4. Priority Escalations
+- Immediate escalation required for:
+  - Repeated delivery failures
+  - High-value orders
+  - Legal or compliance-related complaints
+
+5. Customer Communication
+- Keep the customer informed throughout the escalation process.
+- Provide expected resolution timelines.
+- Ensure follow-up after resolution.
+---CHUNK---

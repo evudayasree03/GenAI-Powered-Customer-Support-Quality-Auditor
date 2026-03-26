@@ -1,0 +1,6 @@
+Never read back full card numbers or passwords on a call.
+Only collect data necessary for the stated purpose.
+Customer has the right to data deletion within 30 days of request.
+Any data breach must be reported to the DPO within 72 hours.
+Call recordings may not be retained beyond 12 months without consent.
+---CHUNK---

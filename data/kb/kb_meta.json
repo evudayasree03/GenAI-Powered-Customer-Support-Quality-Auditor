@@ -1,0 +1,30 @@
+[
+  {
+    "filename": "delivery_policy.txt",
+    "collection": "policies",
+    "chunks": 2,
+    "size_bytes": 911,
+    "indexed": true
+  },
+  {
+    "filename": "escalation_policy.txt",
+    "collection": "policies",
+    "chunks": 2,
+    "size_bytes": 877,
+    "indexed": true
+  },
+  {
+    "filename": "refund_policy.txt",
+    "collection": "policies",
+    "chunks": 2,
+    "size_bytes": 811,
+    "indexed": true
+  },
+  {
+    "filename": "support_policy.txt",
+    "collection": "policies",
+    "chunks": 2,
+    "size_bytes": 968,
+    "indexed": true
+  }
+]

@@ -1,0 +1,26 @@
+Delivery Policy
+
+1. Standard Delivery Timelines
+- Orders are typically delivered within 3-5 business days.
+- Delivery timelines may vary depending on location and product availability.
+
+2. Delayed Deliveries
+- Delays may occur due to:
+  - Weather conditions
+  - Logistics issues
+  - High demand periods
+
+3. Handling Delays
+- Customers must be informed proactively if delays are expected.
+- Agents should provide real-time tracking updates when available.
+- Updated delivery timelines must be communicated clearly.
+
+4. Extended Delays
+- If delivery exceeds 5 business days beyond the estimated date:
+  - The case should be flagged for priority handling.
+  - Compensation options should be considered.
+
+5. Failed Deliveries
+- If delivery fails due to incorrect address or customer unavailability:
+  - A reattempt should be scheduled.
+  - The customer should be contacted for confirmation.

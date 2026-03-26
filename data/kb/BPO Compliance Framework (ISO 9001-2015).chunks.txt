@@ -1,0 +1,6 @@
+All agents must follow approved scripts for regulated topics.
+Financial information must not be disclosed without identity verification.
+Call recordings are mandatory for quality assurance.
+Non-compliance must be reported within 24 hours.
+Corrective actions must be documented and reviewed quarterly.
+---CHUNK---

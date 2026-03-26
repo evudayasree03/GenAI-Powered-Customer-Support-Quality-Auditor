@@ -1,0 +1,7 @@
+Incident management: acknowledge within 60 seconds.
+Always confirm customer identity before accessing account data.
+Closing protocol: confirm resolution before ending every call.
+Escalation path: agent -> senior agent -> supervisor -> manager.
+SLA for billing disputes: resolve within 2 business days.
+Empathy language: mirror customer emotion, then redirect to solution.
+---CHUNK---

@@ -1,0 +1,9 @@
+Empathy (20%): acknowledgment, emotional mirroring, apology quality.
+Professionalism (15%): language, tone, script adherence.
+Compliance (25%): policy accuracy, regulatory adherence, script compliance.
+Resolution (20%): issue resolved, root cause addressed, no false close.
+Communication (5%): clarity, pacing, active listening signals.
+Integrity (15%): factual accuracy, no hallucinations, correct policy citation.
+Phase bonus (+/-5): improving arc = +5, declining arc = -5.
+Auto-fail triggers: rude language, data breach, impossible promise.
+---CHUNK---

@@ -1,0 +1,8 @@
+'I completely understand how frustrating that must be.'
+'I sincerely apologise that this has happened.'
+'Thank you for bringing this to our attention.'
+'I appreciate your patience while I look into this.'
+'I can absolutely see why you feel that way.'
+'Let me personally make sure this is resolved for you.'
+'I am going to take ownership of this issue right now.'
+---CHUNK---
