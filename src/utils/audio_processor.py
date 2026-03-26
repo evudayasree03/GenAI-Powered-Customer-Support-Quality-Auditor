@@ -18,8 +18,6 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-import streamlit as st
-
 
 class AudioProcessor:
     """
@@ -75,10 +73,10 @@ class AudioProcessor:
             return buf.getvalue(), meta
         except ImportError:
             # Fallback if ffmpeg/pydub is not in the environment.
-            st.warning("pydub not installed — audio conversion skipped.")
+            print("WARNING: pydub not installed - audio conversion skipped.")
             return file_bytes, meta
         except Exception as exc:
-            st.warning(f"pydub conversion error ({exc}). Using original file.")
+            print(f"WARNING: pydub conversion error ({exc}). Using original file.")
             return file_bytes, meta
 
     # Narrative Generation (Smart Summary) 

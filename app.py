@@ -24,6 +24,11 @@ try:
     Config.print_status()
 except Exception as e:
     print(f"⚠ Warning: Could not load config module: {e}")
+try:
+    import audioop
+except ImportError:
+    import audioop_lts
+    sys.modules["audioop"] = audioop_lts
 
 import streamlit as st
 from PIL import Image
@@ -104,15 +109,14 @@ def _sidebar_brand() -> None:
         else:
             _render_default_sidebar_logo()
         
-        # Main Title (SamiX) - Modern Style
+        # Main Title
         st.markdown(
-            '<div style="text-align:center;margin-bottom:0.8rem;">'
-            '<div style="font-family:\'Inter\',sans-serif;font-size:1.6rem;'
-            'color:#FFFFFF;letter-spacing:-.02em;line-height:1;font-weight:800;">'
-            'Shopeers <span style="color:#60A5FA;">AI</span></div>'
-            '<div style="font-family:\'Inter\',sans-serif;font-size:.6rem;font-weight:700;'
-            'color:#94A3B8;letter-spacing:.15em;margin-top:.6rem;text-transform:uppercase;">'
-            'Analytics Dashboard</div></div>',
+            '<div style="text-align:center;margin-bottom:1rem;">'
+            '<div style="font-size:1.45rem;color:#FFFFFF;letter-spacing:-0.03em;line-height:1;font-weight:800;">'
+            'SamiX</div>'
+            '<div style="font-size:0.68rem;font-weight:700;'
+            'color:#93C5FD;letter-spacing:0.16em;margin-top:0.55rem;text-transform:uppercase;">'
+            'Support Quality Platform</div></div>',
             unsafe_allow_html=True,
         )
         st.divider()
@@ -127,7 +131,7 @@ def _sidebar_brand() -> None:
             ("pydub",       "ACTIVE",True),
         ]
         st.markdown(
-            '<div style="font-family:\'Inter\',sans-serif;font-size:.7rem;font-weight:700;'
+            '<div style="font-size:.7rem;font-weight:700;'
             'color:#FFFFFF;letter-spacing:.08em;margin-bottom:.8rem;opacity:0.6;">SYSTEM STATUS</div>',
             unsafe_allow_html=True,
         )
@@ -135,7 +139,7 @@ def _sidebar_brand() -> None:
             colour = "#10B981" if ok else "#F59E0B"
             st.markdown(
                 f'<div style="display:flex;justify-content:space-between;'
-                f'font-family:\'Inter\',sans-serif;font-size:.7rem;padding:6px 0;font-weight:500;'
+                f'font-size:.7rem;padding:6px 0;font-weight:500;'
                 f'color:#94A3B8;">'
                 f'<span>{svc}</span>'
                 f'<span style="color:{colour};font-weight:700;display:flex;align-items:center;gap:4px;">'
@@ -146,9 +150,9 @@ def _sidebar_brand() -> None:
         st.divider()
         # User account info and Logout
         st.markdown(
-            f'<div style="font-family:\'Inter\',sans-serif;font-size:.75rem;'
+            f'<div style="font-size:.75rem;'
             f'color:#94A3B8;margin-bottom:.8rem;font-weight:500;">'
-            f'Signed in as<br>'
+            f'Logged in as<br>'
             f'<span style="color:#FFFFFF;font-weight:700;margin-top:0.25rem;display:block;">{auth.current_user_name}</span></div>',
             unsafe_allow_html=True,
         )
@@ -161,11 +165,11 @@ def _role() -> str:
         st.markdown("<br>", unsafe_allow_html=True)
         role = st.radio(
             "View as",
-            ["Agent / Client", "Admin"],
+            ["Agent Workspace", "Admin Workspace"],
             index=0, horizontal=True,
             label_visibility="collapsed",
         )
-    return "admin" if role == "Admin" else "agent"
+    return "admin" if role == "Admin Workspace" else "agent"
 
 
 def _render_default_sidebar_logo() -> None:

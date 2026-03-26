@@ -15,11 +15,15 @@ import json
 import os
 import re
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Optional, Union
 
 import streamlit as st
 
+from src.db import get_db
+from src.storage import FileStorage
 from src.utils.history_manager import TranscriptTurn
 
 
@@ -41,11 +45,13 @@ class STTProcessor:
     def __init__(self) -> None:
         """ Initializes the processor and establishes the Deepgram connection. """
         self._deepgram = self._build_deepgram()
+        self._db = get_db()
+        self._storage = FileStorage()
 
     def _build_deepgram(self) -> Optional[object]:
         """ Attempts to initialize the Deepgram SDK from secrets. """
         try:
-            key = st.secrets["deepgram"]["api_key"]
+            key = os.environ.get("DEEPGRAM_API_KEY", "") or st.secrets.get("deepgram", {}).get("api_key", "")
             if "REPLACE" in key:
                 return None
             from deepgram import DeepgramClient
@@ -64,6 +70,7 @@ class STTProcessor:
         self,
         file_bytes: bytes,
         filename: str,
+        session_id: Optional[str] = None,
     ) -> list[TranscriptTurn]:
         """
         [Main Entry] Detects the file type and produces a normalized transcript.
@@ -72,17 +79,54 @@ class STTProcessor:
         and timestamps.
         """
         ext = Path(filename).suffix.lower()
+        storage_session_id = session_id or str(uuid.uuid4())[:8]
+        started = time.perf_counter()
         
         # Route audio files to transcription engines.
         if ext in self.AUDIO_EXTS:
-            return await self._process_audio(file_bytes, filename)
+            turns, processor_used, confidence_score = await self._process_audio(file_bytes, filename)
+        elif ext in self.TEXT_EXTS:
+            turns = self._parse_text(file_bytes, filename)
+            processor_used = f"parser:{ext.lstrip('.') or 'text'}"
+            confidence_score = 1.0
+        else:
+            turns = self._parse_text(file_bytes, filename)
+            processor_used = "parser:text"
+            confidence_score = 1.0
             
-        # Route text files to structural parsers.
-        if ext in self.TEXT_EXTS:
-            return self._parse_text(file_bytes, filename)
-            
-        # Default fallback: Treat as plain text.
-        return self._parse_text(file_bytes, filename)
+        transcript_text = transcript_to_text(turns)
+        payload = {
+            "session_id": storage_session_id,
+            "filename": filename,
+            "processor_used": processor_used,
+            "confidence_score": confidence_score,
+            "turns": [t.__dict__ for t in turns],
+        }
+        file_path, request_hash = self._storage.save_json(
+            "transcriptions",
+            storage_session_id,
+            payload,
+            filename_prefix="transcription",
+        )
+        self._db.save_transcription(
+            storage_session_id,
+            filename,
+            transcript_text,
+            confidence_score=confidence_score,
+            processor_used=processor_used,
+            status="completed",
+        )
+        self._db.save_api_response(
+            session_id=storage_session_id,
+            api_name=processor_used,
+            endpoint="transcription",
+            request_hash=request_hash,
+            response_json=payload,
+            status_code=200,
+            processing_time_ms=round((time.perf_counter() - started) * 1000, 2),
+            file_path=file_path,
+        )
+        return turns
 
     async def process_chunk(self, audio_bytes: bytes) -> list[TranscriptTurn]:
         """
@@ -94,7 +138,7 @@ class STTProcessor:
 
     # Audio Processing Pipeline 
 
-    async def _process_audio(self, data: bytes, filename: str) -> list[TranscriptTurn]:
+    async def _process_audio(self, data: bytes, filename: str) -> tuple[list[TranscriptTurn], str, float]:
         """
         Handles raw audio transcription using a prioritized fallback strategy.
         Prioritizes Deepgram (Cloud) over Whisper (Local).
@@ -104,12 +148,13 @@ class STTProcessor:
 
         # Level 1: Deepgram (Preferred for speed and diarization quality).
         if self.has_deepgram:
-            result = await self._deepgram_transcribe(wav_data)
+            result, confidence = await self._deepgram_transcribe(wav_data)
             if result is not None:
-                return result
+                return result, "deepgram:nova-3", confidence
 
         # Level 2: Whisper (Fallback for accuracy and reliability).
-        return await self._whisper_transcribe(wav_data)
+        turns = await self._whisper_transcribe(wav_data)
+        return turns, "whisper:base", 0.65
 
     def _pydub_convert(self, data: bytes, filename: str) -> bytes:
         """
@@ -130,7 +175,7 @@ class STTProcessor:
 
     async def _deepgram_transcribe(
         self, wav_data: bytes
-    ) -> Optional[list[TranscriptTurn]]:
+    ) -> tuple[Optional[list[TranscriptTurn]], float]:
         """
         Executes a diarized transcription call to Deepgram Nova-3.
         """
@@ -140,9 +185,9 @@ class STTProcessor:
             return await asyncio.to_thread(self._sync_deepgram_call, wav_data)
         except Exception as exc:
             st.warning(f"Deepgram error: {exc}. Falling back to Whisper.")
-            return None
+            return None, 0.0
 
-    def _sync_deepgram_call(self, wav_data: bytes) -> Optional[list[TranscriptTurn]]:
+    def _sync_deepgram_call(self, wav_data: bytes) -> tuple[Optional[list[TranscriptTurn]], float]:
         """ Synchronous wrapper for the Deepgram SDK call. """
         try:
             from deepgram import PrerecordedOptions, FileSource
@@ -161,11 +206,13 @@ class STTProcessor:
             if words:
                 avg_conf = sum(w.confidence for w in words) / len(words)
                 if avg_conf < self.CONF_THRESHOLD:
-                    return None
+                    return None, float(avg_conf)
+            else:
+                avg_conf = 0.0
 
-            return self._dg_words_to_turns(words)
+            return self._dg_words_to_turns(words), float(avg_conf)
         except Exception:
-            return None
+            return None, 0.0
 
     @staticmethod
     def _dg_words_to_turns(words: list) -> list[TranscriptTurn]:

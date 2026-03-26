@@ -10,13 +10,18 @@ The pipeline follows these stages:
 from __future__ import annotations
 
 import json
+import os
 import re
 import random
+import time
+import uuid
 from dataclasses import dataclass
 from typing import Optional, Any
 
 import streamlit as st
 
+from src.db import get_db
+from src.storage import FileStorage
 from src.utils.history_manager import (
     AuditScores, TranscriptTurn, WrongTurn,
     EngineAResult, EngineBClaim, EngineBResult, EngineCResult
@@ -226,6 +231,10 @@ Return ONLY valid JSON matching this exact schema -- no markdown:
 Scoring weights:
   empathy 20%, professionalism 15%, compliance 25%,
   resolution 20%, communication 5%, integrity 15%.
+
+When POLICY CONTEXT is provided, you MUST cite it when populating
+"rag_source" and "correct_fact" fields. Prioritize policy facts over
+general knowledge. If no policy context is provided, use best knowledge.
 """
 
 
@@ -245,11 +254,13 @@ class GroqClient:
         """ Establishes the connection to the Groq API if secrets are available. """
         self._client = self._build_client()
         self._async_client = self._build_async_client()
+        self._db = get_db()
+        self._storage = FileStorage()
 
     def _build_client(self) -> Optional[object]:
         """ Initializes the synchronous Groq SDK client. """
         try:
-            api_key = st.secrets["groq"]["api_key"]
+            api_key = os.environ.get("GROQ_API_KEY", "") or st.secrets.get("groq", {}).get("api_key", "")
             if api_key.startswith("gsk_REPLACE"): return None
             from groq import Groq
             return Groq(api_key=api_key)
@@ -259,7 +270,7 @@ class GroqClient:
     def _build_async_client(self) -> Optional[object]:
         """ Initializes the asynchronous Groq SDK client. """
         try:
-            api_key = st.secrets["groq"]["api_key"]
+            api_key = os.environ.get("GROQ_API_KEY", "") or st.secrets.get("groq", {}).get("api_key", "")
             if api_key.startswith("gsk_REPLACE"): return None
             from groq import AsyncGroq
             return AsyncGroq(api_key=api_key)
@@ -271,23 +282,88 @@ class GroqClient:
         """ Returns True if valid Groq API connections are established. """
         return self._client is not None and self._async_client is not None
 
-    async def summarise(self, transcript_text: str) -> SummaryResult:
+    async def summarise(self, transcript_text: str, session_id: Optional[str] = None) -> SummaryResult:
         """
         [STEP 1] Generates a structured summary and phase breakdown of the transcript.
         """
-        if not self.is_live: return _mock_summary()
-        return await self._real_summarise(transcript_text)
+        storage_session_id = session_id or str(uuid.uuid4())[:8]
+        if not self.is_live:
+            result = _mock_summary()
+            self._store_exchange(
+                session_id=storage_session_id,
+                api_name="groq_summary_mock",
+                endpoint="chat.completions",
+                request_payload={"transcript_text": transcript_text},
+                response_payload=result.__dict__,
+                processing_time_ms=0.0,
+            )
+            return result
+        return await self._real_summarise(transcript_text, storage_session_id)
 
-    async def score(self, transcript_text: str, summary: SummaryResult) -> ScoringResult:
+    async def score(self, transcript_text: str, summary: SummaryResult, rag_context: str = "", session_id: Optional[str] = None) -> ScoringResult:
         """
         [STEP 2] Performs a deep-dive audit, scoring behavior and detecting anomalies.
         """
-        if not self.is_live: return _mock_scoring()
-        return await self._real_score(transcript_text, summary)
+        storage_session_id = session_id or str(uuid.uuid4())[:8]
+        if not self.is_live:
+            result = _mock_scoring()
+            self._store_exchange(
+                session_id=storage_session_id,
+                api_name="groq_score_mock",
+                endpoint="chat.completions",
+                request_payload={"transcript_text": transcript_text, "summary": summary.__dict__},
+                response_payload={
+                    "scores": result.scores.__dict__,
+                    "violations": result.violations,
+                    "wrong_turns": [wt.__dict__ for wt in result.wrong_turns],
+                    "token_count": result.token_count,
+                },
+                processing_time_ms=0.0,
+                tokens_used=result.token_count,
+            )
+            return result
+        return await self._real_score(transcript_text, summary, rag_context, storage_session_id)
+
+    def _store_exchange(
+        self,
+        *,
+        session_id: str,
+        api_name: str,
+        endpoint: str,
+        request_payload: dict[str, Any],
+        response_payload: dict[str, Any],
+        processing_time_ms: float,
+        status_code: int = 200,
+        tokens_used: Optional[int] = None,
+    ) -> None:
+        file_path, request_hash = self._storage.save_json(
+            "llm_scores",
+            session_id,
+            {
+                "api_name": api_name,
+                "endpoint": endpoint,
+                "request": request_payload,
+                "response": response_payload,
+            },
+            filename_prefix=api_name,
+        )
+        self._db.save_api_response(
+            session_id=session_id,
+            api_name=api_name,
+            endpoint=endpoint,
+            request_hash=request_hash,
+            response_json=response_payload,
+            status_code=status_code,
+            processing_time_ms=processing_time_ms,
+            tokens_used=tokens_used,
+            file_path=file_path,
+        )
+        if tokens_used is not None:
+            self._db.record_api_cost(session_id, "groq", None, tokens_used)
 
     # Implementation Details 
 
-    async def _real_summarise(self, transcript_text: str) -> SummaryResult:
+    async def _real_summarise(self, transcript_text: str, session_id: str) -> SummaryResult:
         """ Executes the Step 1 AI call to summarize context using AsyncGroq. """
         prompt = (
             "Analyse this customer support transcript and return a JSON object with:\n"
@@ -298,6 +374,7 @@ class GroqClient:
             "Return ONLY valid JSON."
         )
         try:
+            started = time.perf_counter()
             resp = await self._async_client.chat.completions.create(
                 model=self.MODEL,
                 messages=[{"role": "user", "content": prompt}],
@@ -305,7 +382,7 @@ class GroqClient:
                 max_tokens=1000,
             )
             data = json.loads(resp.choices[0].message.content.strip())
-            return SummaryResult(
+            result = SummaryResult(
                 customer_query=data.get("customer_query", ""),
                 sub_queries=data.get("sub_queries", []),
                 query_category=data.get("query_category", "General"),
@@ -313,19 +390,35 @@ class GroqClient:
                 phases=data.get("phases", {}),
                 key_moments=data.get("key_moments", []),
             )
+            self._store_exchange(
+                session_id=session_id,
+                api_name="groq_summary",
+                endpoint="chat.completions",
+                request_payload={"transcript_text": transcript_text},
+                response_payload=data,
+                processing_time_ms=round((time.perf_counter() - started) * 1000, 2),
+                tokens_used=getattr(resp.usage, "total_tokens", None),
+            )
+            return result
         except Exception as exc:
             st.warning(f"Groq Call 1 failed ({exc}). Using mock.")
             return _mock_summary()
 
-    async def _real_score(self, transcript_text: str, summary: SummaryResult) -> ScoringResult:
+    async def _real_score(self, transcript_text: str, summary: SummaryResult, rag_context: str, session_id: str) -> ScoringResult:
         """ Executes the Step 2 AI call to perform a comprehensive audit using AsyncGroq. """
+        rag_section = (
+            f"\n\nPOLICY CONTEXT (RAG-retrieved — use for wrong turn verification):\n"
+            f"{rag_context[:3000]}"
+        ) if rag_context else ""
         user_msg = (
             f"TRANSCRIPT:\n{transcript_text}\n\n"
             f"CUSTOMER QUERY:\n{summary.customer_query}\n\n"
             f"CUSTOMER EXPECTATIONS:\n{summary.customer_expectation}\n\n"
             f"KEY MOMENTS:\n{chr(10).join(summary.key_moments)}"
+            f"{rag_section}"
         )
         try:
+            started = time.perf_counter()
             resp = await self._async_client.chat.completions.create(
                 model=self.MODEL,
                 messages=[
@@ -339,7 +432,17 @@ class GroqClient:
             raw   = resp.choices[0].message.content.strip()
             usage = resp.usage
             data  = json.loads(raw)
-            return self._parse_scoring_response(data, usage.total_tokens if usage else 4000)
+            result = self._parse_scoring_response(data, usage.total_tokens if usage else 4000)
+            self._store_exchange(
+                session_id=session_id,
+                api_name="groq_score",
+                endpoint="chat.completions",
+                request_payload={"transcript_text": transcript_text, "summary": summary.__dict__},
+                response_payload=data,
+                processing_time_ms=round((time.perf_counter() - started) * 1000, 2),
+                tokens_used=usage.total_tokens if usage else None,
+            )
+            return result
         except Exception as exc:
             st.warning(f"Groq Call 2 failed ({exc}). Using mock.")
             return _mock_scoring()

@@ -23,9 +23,9 @@ import json
 import os
 import re
 import textwrap
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional, Any, Iterable
+from typing import Optional
 
 import streamlit as st
 
@@ -34,8 +34,10 @@ import streamlit as st
 
 CHUNK_SIZE     = 800      # Increased for BGE-small's 512 token limit (~800-1000 chars)
 CHUNK_OVERLAP  = 100
-TOP_K          = 5
+TOP_K          = 10      # Increased for reranking (pre-rerank pool)
+RERANK_K       = 4       # Final Top-K returned after reranking
 EMBED_MODEL    = "BAAI/bge-small-en-v1.5"
+RERANK_MODEL   = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 MILVUS_DB      = "milvus_lite.db"
 META_PATH      = "data/kb/kb_meta.json"
 KB_DIR         = "data/kb"
@@ -174,12 +176,40 @@ class KBManager:
         os.makedirs(KB_DIR, exist_ok=True)
         self._files: list[KBFile]      = []
         self._embeddings               = None
+        self._reranker                 = None
         self._stores: dict[str, object] = {}   # Mapping of collection -> Milvus VectorStore
         self._load_meta()
         self._init_embeddings()
-        self._load_generalised_kb()
+        self._init_reranker()
         self._reload_existing_stores()
+        self._load_generalised_kb()
         self._autoload_dropped_files()
+
+    @staticmethod
+    def _safe_source_name(source: str) -> str:
+        """ Normalizes a source name for chunk-backup filenames on Windows. """
+        return source.replace(":", "-").replace("/", "_").replace("\\", "_")
+
+    def _fallback_path(self, source: str) -> str:
+        """ Returns the chunk-backup path for a given source. """
+        return os.path.join(KB_DIR, f"{self._safe_source_name(source)}.chunks.txt")
+
+    def _source_collection_map(self) -> dict[str, str]:
+        """ Maps persisted chunk sources back to their owning collection. """
+        mapping = {
+            self._safe_source_name(f.filename): f.collection
+            for f in self._files
+        }
+        mapping.update({
+            self._safe_source_name(item["name"]): item["collection"]
+            for item in GENERALISED_KB
+        })
+        return mapping
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """ Normalizes text for keyword retrieval and numeric policy checks. """
+        return re.findall(r"[a-z0-9]+", text.lower())
 
     def _autoload_dropped_files(self) -> None:
         """ 
@@ -225,7 +255,7 @@ class KBManager:
             transformers_logging.set_verbosity_error()
             
             # Check for HF_TOKEN to enable higher rate limits if provided
-            hf_token = os.getenv("HF_TOKEN") or st.secrets.get("HF_TOKEN")
+            hf_token = os.getenv("HF_TOKEN", "")
             if hf_token:
                 os.environ["HF_TOKEN"] = hf_token
             
@@ -239,18 +269,29 @@ class KBManager:
             st.warning(f"Embedding model unavailable ({exc}). Keyword fallback active.")
             self._embeddings = None
 
+    def _init_reranker(self) -> None:
+        """
+        [Stage 2 - Retrieval] Loads the Cross-Encoder reranker.
+        Uses sentence-transformers CrossEncoder (ms-marco-MiniLM-L-6-v2).
+        """
+        try:
+            from sentence_transformers import CrossEncoder
+            self._reranker = CrossEncoder(RERANK_MODEL, device="cpu")
+        except Exception as exc:
+            import streamlit as _st
+            _st.warning(f"Reranker unavailable ({exc}). Using RRF only.")
+            self._reranker = None
+
     def _load_generalised_kb(self) -> None:
-        """ Boots up the vector store with standard industry knowledge. """
-        if not self._embeddings:
-            return
+        """ Ensures the seed KB exists for both vector and keyword retrieval. """
         for item in GENERALISED_KB:
-            collection = item["collection"]
-            if self._stores.get(collection) is None:
-                self._index_text(
-                    text=item["content"],
-                    source=item["name"],
-                    collection=collection,
-                )
+            if os.path.exists(self._fallback_path(item["name"])):
+                continue
+            self._index_text(
+                text=item["content"],
+                source=item["name"],
+                collection=item["collection"],
+            )
 
     def _reload_existing_stores(self) -> None:
         """ Re-connects to Milvus collections that already exist on disk. """
@@ -392,8 +433,38 @@ class KBManager:
             # 2. Keyword Search (BM25)
             all_keyword_results.extend(self._bm25_query(question, col, top_k * 2))
 
-        # 3. Reciprocal Rank Fusion (RRF)
-        return self._fuse_results(all_vector_results, all_keyword_results, top_k)
+        # 3. RRF — merge vector + keyword into a broad candidate set
+        candidates = self._fuse_results(all_vector_results, all_keyword_results, top_k * 2)
+
+        # 4. Neural Reranking (Cross-Encoder) — precision pass over candidates
+        return self._rerank_results(question, candidates, top_k)
+
+    def _rerank_results(
+        self,
+        query: str,
+        results: list[RAGResult],
+        top_k: int,
+    ) -> list[RAGResult]:
+        """
+        [Stage 2 — Retrieval] Cross-Encoder reranking.
+        Each (query, passage) pair is scored by a bi-encoder-independent model
+        that attends to both texts jointly, yielding far more accurate scores.
+        Falls back to RRF order if the reranker is unavailable.
+        """
+        if not self._reranker or not results:
+            return results[:top_k]
+        try:
+            import numpy as np
+            pairs = [[query, r.text] for r in results]
+            raw_scores = self._reranker.predict(pairs)
+            for res, sc in zip(results, raw_scores):
+                # Convert logit to probability-like score in [0, 1]
+                res.score = float(1.0 / (1.0 + np.exp(-float(sc))))
+            return sorted(results, key=lambda x: x.score, reverse=True)[:top_k]
+        except Exception as exc:
+            import streamlit as _st
+            _st.warning(f"Reranking error: {exc}")
+            return results[:top_k]
 
     def _fuse_results(
         self, 
@@ -447,6 +518,12 @@ class KBManager:
         """
         Determines the factual accuracy of an agent's statement asynchronously.
         """
+        # Retrieve relevant policies from the Knowledge Base
+        search_query = " ".join(
+            part.strip() for part in (context_question, agent_statement) if part and part.strip()
+        )
+        chunks = await self.query(search_query)
+        
         if not chunks:
             return {
                 "answer":        "No relevant policy found in Knowledge Base.",
@@ -461,6 +538,7 @@ class KBManager:
             sum(r.score for r in chunks) / len(chunks), 3
         ) if chunks else 0.0
         citations = [r.to_citation() for r in chunks] if chunks else []
+        context_text = "\n".join([r.text for r in chunks]) if chunks else ""
 
         # Factual integrity check logic.
         if not chunks or not chunks[0]:
@@ -515,9 +593,7 @@ class KBManager:
             return
 
         # Write text-based backup for keyword search fallback.
-        # Sanitize name for Windows (replace : with -)
-        safe_source = source.replace(":", "-").replace("/", "_").replace("\\", "_")
-        fallback_path = os.path.join(KB_DIR, f"{safe_source}.chunks.txt")
+        fallback_path = self._fallback_path(source)
         with open(fallback_path, "w", encoding="utf-8") as fh:
             for c in chunks:
                 fh.write(c + "\n---CHUNK---\n")
@@ -618,18 +694,16 @@ class KBManager:
         """
         try:
             from rank_bm25 import BM25Okapi
+            source_map = self._source_collection_map()
             
             # 1. Collect all chunks for this collection
             corpus_chunks: list[tuple[str, str]] = [] # (text, source)
             for fname in os.listdir(KB_DIR):
                 if not fname.endswith(".chunks.txt"):
                     continue
-                # Simple collection filter (assumes source metadata handling is consistent)
                 source = fname.replace(".chunks.txt", "")
-                
-                # We need to verify which collection this file belongs to.
-                # If we don't have perfect mapping, we search all chunks but filter by metadata if available.
-                # For now, we'll load everything and filter.
+                if source_map.get(source) != collection:
+                    continue
                 try:
                     with open(os.path.join(KB_DIR, fname), encoding="utf-8") as fh:
                         content = fh.read()
@@ -644,17 +718,22 @@ class KBManager:
                 return []
 
             # 2. Tokenize and index
-            tokenized_corpus = [c[0].lower().split() for c in corpus_chunks]
+            tokenized_corpus = [self._tokenize(c[0]) for c in corpus_chunks]
             bm25 = BM25Okapi(tokenized_corpus)
             
             # 3. Query
-            tokenized_query = question.lower().split()
+            tokenized_query = self._tokenize(question)
             doc_scores = bm25.get_scores(tokenized_query)
             
             # 4. Format results
             indices = sorted(range(len(doc_scores)), key=lambda i: doc_scores[i], reverse=True)
+            if not indices:
+                return []
+            if doc_scores[indices[0]] <= 0:
+                return self._keyword_query(question, collection, top_k)
+
             results = []
-            max_score = doc_scores[indices[0]] if indices and doc_scores[indices[0]] > 0 else 1
+            max_score = doc_scores[indices[0]]
             
             for i in indices[:top_k]:
                 if doc_scores[i] <= 0: break
@@ -680,20 +759,23 @@ class KBManager:
         Legacy keyword overlap search. 
         Used when vector DB is unavailable or for simple exact-match lookups.
         """
-        keywords = set(question.lower().split())
+        keywords = set(self._tokenize(question))
         results: list[tuple[int, str, str]] = []
+        source_map = self._source_collection_map()
 
         for fname in os.listdir(KB_DIR):
             if not fname.endswith(".chunks.txt"):
                 continue
             source = fname.replace(".chunks.txt", "")
+            if source_map.get(source) != collection:
+                continue
             try:
                 with open(os.path.join(KB_DIR, fname), encoding="utf-8") as fh:
                     raw = fh.read()
                 for chunk in raw.split("---CHUNK---\n"):
                     chunk = chunk.strip()
                     if not chunk: continue
-                    overlap = len(keywords & set(chunk.lower().split()))
+                    overlap = len(keywords & set(self._tokenize(chunk)))
                     if overlap > 0:
                         results.append((overlap, chunk, source))
             except Exception:

@@ -8,11 +8,13 @@ session state management for the Streamlit application.
 from __future__ import annotations
 
 import streamlit as st
-import os
 from pathlib import Path
 import yaml
 from yaml.loader import SafeLoader
 import bcrypt
+
+from src.db import get_db
+from src.utils.validators import is_valid_email
 
 class AuthManager:
     """
@@ -26,6 +28,7 @@ class AuthManager:
 
     def __init__(self) -> None:
         """ Initialize the manager and load the user database. """
+        self._db = get_db()
         self._load_config()
 
     def _load_config(self) -> None:
@@ -54,11 +57,24 @@ class AuthManager:
             self._config = yaml.load(file, Loader=SafeLoader)
             if "credentials" not in self._config:
                 self._config["credentials"] = {}
+        self.migrate_yaml_to_sqlite()
 
     def save_config(self) -> None:
         """ Persists the current in-memory user database back to the YAML file. """
         with open(self._USERS_YAML, "w", encoding="utf-8") as file:
             yaml.dump(self._config, file, default_flow_style=False)
+
+    def migrate_yaml_to_sqlite(self) -> None:
+        """ Ensures legacy YAML credentials are mirrored into SQLite. """
+        creds = self._config.get("credentials", {})
+        for email, user in creds.items():
+            self._db.upsert_user(
+                email=email,
+                name=user.get("name", "User"),
+                password_hash=user.get("password", ""),
+                role=user.get("role", "admin" if email == "admin@samix.ai" else "agent"),
+                is_active=user.get("is_active", True),
+            )
 
     def login(self, email: str, password: str) -> bool:
         """
@@ -66,17 +82,35 @@ class AuthManager:
         Updates Streamlit session state on successful authentication.
         """
         email = email.lower().strip()
-        creds = self._config.get("credentials", {})
-        
-        if email in creds:
-            user = creds[email]
-            hashed_pw = user.get("password", "")
+        db_user = self._db.get_user_by_email(email)
+        if db_user:
+            hashed_pw = db_user.get("password_hash", "")
             # Securely compare the provided password with the stored hash.
             if self._check_password(password, hashed_pw):
                 st.session_state["authentication_status"] = True
-                st.session_state["name"] = user.get("name", "User")
+                st.session_state["name"] = db_user.get("name", "User")
                 st.session_state["email"] = email
+                st.session_state["role"] = db_user.get("role", "agent")
+                self._db.update_last_login(email)
                 return True
+        else:
+            creds = self._config.get("credentials", {})
+            if email in creds:
+                user = creds[email]
+                hashed_pw = user.get("password", "")
+                if self._check_password(password, hashed_pw):
+                    st.session_state["authentication_status"] = True
+                    st.session_state["name"] = user.get("name", "User")
+                    st.session_state["email"] = email
+                    st.session_state["role"] = user.get("role", "agent")
+                    self._db.upsert_user(
+                        email=email,
+                        name=user.get("name", "User"),
+                        password_hash=hashed_pw,
+                        role=user.get("role", "agent"),
+                    )
+                    self._db.update_last_login(email)
+                    return True
                 
         st.session_state["authentication_status"] = False
         return False
@@ -87,17 +121,25 @@ class AuthManager:
         Returns False if the email is already in use.
         """
         email = email.lower().strip()
+        if not is_valid_email(email):
+            return False
         creds = self._config.setdefault("credentials", {})
         
-        if email in creds:
+        if email in creds or self._db.get_user_by_email(email):
             return False # Prevent duplicate registration.
             
         hashed_pw = self._hash_password(password)
         creds[email] = {
-            "name": name,
+            "name": name.strip() or "User",
             "password": hashed_pw
         }
         self.save_config()
+        self._db.upsert_user(
+            email=email,
+            name=name.strip() or "User",
+            password_hash=hashed_pw,
+            role="agent",
+        )
         return True
 
     def _hash_password(self, raw: str) -> str:
@@ -130,6 +172,7 @@ class AuthManager:
             st.session_state["authentication_status"] = None
             st.session_state["name"] = None
             st.session_state["email"] = None
+            st.session_state["role"] = None
             st.rerun()
 
     @property
@@ -141,3 +184,7 @@ class AuthManager:
     def current_user_email(self) -> str:
         """ Returns the email address of the logged-in user. """
         return st.session_state.get("email", "")
+
+    @property
+    def current_user_role(self) -> str:
+        return st.session_state.get("role", "agent")

@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.pipeline.alert_engine import AlertEngine
+from src.ui.components import render_page_hero
 from src.utils.history_manager import HistoryManager
 from src.utils.kb_manager      import KBManager
 
@@ -101,13 +102,29 @@ class AdminPanel:
         Main entry point for rendering the multi-tabbed dashboard.
         Segments logic into specialized views for overview, models, users, etc.
         """
+        sessions = self._history.get_all()
+        avg_score = (
+            sum(s.scores.final_score for s in sessions) / len(sessions)
+            if sessions else 0.0
+        )
+        render_page_hero(
+            "Admin Workspace",
+            "Monitor audit quality, model health, and policy coverage.",
+            "Use the admin surface to review performance trends, retrieval coverage, and operational metrics in a production-friendly Streamlit layout.",
+            stats=[
+                ("Audits", str(len(sessions)), "records currently stored"),
+                ("Average Score", f"{avg_score:.1f}/100" if sessions else "0/100", "current quality baseline"),
+                ("KB Documents", str(len(self._kb.files) + len(self._kb.generalised_kb)), "uploaded plus built-in"),
+                ("Retrieval", "Vector" if self._kb.is_vector_enabled else "Fallback", "Milvus or keyword mode"),
+            ],
+        )
         tabs = st.tabs([
-            "🏠 Overview",
-            "🤖 Model performance",
-            "👥 Users",
-            "💳 Billing",
-            "📚 RAG knowledge base",
-            "⚙ System health",
+            "Overview",
+            "Model Performance",
+            "Users",
+            "Billing",
+            "RAG Knowledge Base",
+            "System Health",
         ])
         with tabs[0]: self._overview()
         with tabs[1]: self._model_perf()
@@ -142,7 +159,7 @@ class AdminPanel:
             fig = _line(DAYS, scores, y_min=55, y_max=90)
             fig.add_hline(y=60, line_dash="dash", line_color="rgba(239,68,68,.4)",
                           annotation_text="Fail threshold", annotation_font_size=8)
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         with col_donut:
             st.markdown("##### Verdict split")
@@ -156,7 +173,7 @@ class AdminPanel:
                 legend=dict(font=dict(color="#64748B",size=9)),
                 margin=dict(l=0,r=0,t=4,b=0), height=180,
             )
-            st.plotly_chart(fig2, width="stretch")
+            st.plotly_chart(fig2, use_container_width=True)
 
         col_lb, col_viol = st.columns(2)
         with col_lb:
@@ -181,7 +198,7 @@ class AdminPanel:
                 {"Agent":"Priya M.", "Type":"False close",       "Sev":"Critical","Time":"09:38"},
                 {"Agent":"James T.", "Type":"Script missed",     "Sev":"High",    "Time":"09:21"},
                 {"Agent":"Rita S.",  "Type":"Empathy gap",       "Sev":"Medium",  "Time":"08:55"},
-            ]), width="stretch", hide_index=True)
+            ]), use_container_width=True, hide_index=True)
 
     # 2 · MODEL PERFORMANCE
     def _model_perf(self) -> None:
@@ -201,14 +218,14 @@ class AdminPanel:
             st.plotly_chart(
                 _line(DAYS, [820,790,840,810,830,800,850,820,800,790,810,830,800,815],
                       y_min=600, y_max=1000),
-                width="stretch",
+                use_container_width=True,
             )
         with col_acc:
             st.markdown("##### Scoring accuracy — user feedback (out of 5)")
             st.plotly_chart(
                 _line(DAYS, [3.8,3.9,4.0,4.0,4.1,4.0,4.2,4.1,4.1,4.2,4.1,4.2,4.1,4.1],
                       colour="#10B981", y_min=3, y_max=5),
-                width="stretch",
+                use_container_width=True,
             )
 
         cg, cs, cr = st.columns(3)
@@ -250,7 +267,7 @@ class AdminPanel:
         fig = _line(DAYS, compliance_trend, colour="#F59E0B", y_min=50, y_max=90)
         fig.add_hline(y=70, line_dash="dash", line_color="rgba(16,185,129,.4)",
                       annotation_text="Compliant threshold", annotation_font_size=8)
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     # 3 · USERS
     def _users(self) -> None:
@@ -267,12 +284,12 @@ class AdminPanel:
             st.markdown("##### Quantity of logs per day (all users)")
             activity = [210,220,198,235,242,218,229,241,250,238,244,251,248,247]
             st.plotly_chart(_line(DAYS, activity, y_min=150, y_max=280),
-                            width="stretch")
+                            use_container_width=True)
         with col_grow:
             st.markdown("##### User growth — 4 weeks")
             st.plotly_chart(
                 _bar(["Wk1","Wk2","Wk3","Wk4"], [15,16,17,18], y_min=10, y_max=25),
-                width="stretch",
+                use_container_width=True,
             )
 
         st.markdown("##### User list — usage + accessibility")
@@ -339,7 +356,7 @@ class AdminPanel:
                 yaxis2=dict(overlaying="y",side="right",showgrid=False),
                 xaxis=dict(gridcolor="rgba(0,0,0,0)"),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         with col_costs:
             st.markdown("##### API cost breakdown — this month")
@@ -552,7 +569,7 @@ class AdminPanel:
                 yaxis=dict(gridcolor="#F1F5F9"),
                 xaxis=dict(gridcolor="rgba(0,0,0,0)"),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
         with col_q:
             st.markdown("##### Queue + pipeline")

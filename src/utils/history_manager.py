@@ -19,6 +19,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Optional
 
+from src.db import get_db
+
 
 # Audit Detail Schemas 
 
@@ -181,6 +183,7 @@ class HistoryManager:
     def __init__(self) -> None:
         """ Ensures storage directories exist and pre-loads history into cache. """
         os.makedirs(self.DIR, exist_ok=True)
+        self._db = get_db()
         self._cache: dict[str, AuditSession] = {}
         self._load_all()
 
@@ -200,6 +203,10 @@ class HistoryManager:
                 self._cache[sess.session_id] = sess
             except Exception:
                 pass  # Tolerate corrupted JSON files.
+
+    @staticmethod
+    def _transcript_to_text(turns: list[TranscriptTurn]) -> str:
+        return "\n".join(f"{t.speaker} [T{t.turn} {t.timestamp}]: {t.text}" for t in turns)
 
     @staticmethod
     def _from_dict(d: dict) -> AuditSession:
@@ -247,6 +254,25 @@ class HistoryManager:
         data = asdict(session)
         with open(self._session_path(session.session_id), "w") as fh:
             json.dump(data, fh, indent=2, default=str)
+        self._db.save_audit_session(
+            session_id=session.session_id,
+            filename=session.filename,
+            agent_name=session.agent_name,
+            upload_time=session.upload_time,
+            mode=session.mode,
+            transcript_text=self._transcript_to_text(session.transcript),
+            empathy_score=session.scores.empathy,
+            compliance_score=session.scores.compliance,
+            resolution_score=session.scores.resolution,
+            overall_score=session.scores.final_score,
+            summary=session.summary or session.summary_customer_query,
+            violations=session.violations,
+            key_moments=session.summary_key_moments,
+            token_count=session.token_count,
+            cost_usd=session.cost_usd,
+            is_flagged=session.scores.final_score < 60,
+            flag_reason=session.scores.verdict,
+        )
 
     def get_all(self) -> list[AuditSession]:
         """ Returns all sessions, sorted by ingestion time (newest first). """
@@ -274,3 +300,9 @@ class HistoryManager:
         path = self._session_path(session_id)
         if os.path.exists(path):
             os.remove(path)
+        self._db.execute("DELETE FROM audit_sessions WHERE session_id = ?", (session_id,))
+
+    def migrate_json_to_sqlite(self) -> None:
+        """ Backfills legacy JSON sessions into SQLite. """
+        for session in self.get_all():
+            self.save(session)

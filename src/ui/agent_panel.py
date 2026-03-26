@@ -25,11 +25,16 @@ from src.pipeline.groq_client      import GroqClient
 from src.pipeline.stt_processor    import STTProcessor, transcript_to_text
 from src.utils.audio_processor     import AudioProcessor
 from src.utils.cost_tracker        import CostTracker
-from src.utils.history_manager     import AuditSession, HistoryManager
+from src.utils.history_manager     import (
+    AuditSession, AuditScores, HistoryManager,
+    WrongTurn, EngineAResult, EngineBResult, EngineBClaim, EngineCResult,
+)
 from src.utils.kb_manager          import KBManager
 from src.utils.report_generator    import ReportGenerator
+from src.api_client                import SamiXClient
 from audio_recorder_streamlit import audio_recorder
 from src.ui.components import (
+    render_page_hero,
     build_history_dataframe, render_cost_card, render_dual_score_chart,
     render_filename_badge, render_three_gauges, render_transcript,
     render_wrong_turns,
@@ -61,6 +66,7 @@ class AgentPanel:
         self._alerts   = alerts
         self._kb       = kb
         self._reports  = ReportGenerator()
+        self._api_client = SamiXClient()
 
     # Entry 
     def render(self) -> None:
@@ -68,11 +74,22 @@ class AgentPanel:
         Renders the multi-tabbed agent workspace.
         Organizes the workflow into Audit, History, Detail, and Personal Analytics.
         """
+        render_page_hero(
+            "Agent Workspace",
+            "Audit customer conversations in one clean workspace.",
+            "Run new audits, inspect wrong turns, and review saved sessions with grounded retrieval support.",
+            stats=[
+                ("Sessions", str(len(self._history.get_all())), "saved audit records"),
+                ("Scoring", "Groq", "summary and QA scoring"),
+                ("STT", "DG / Whisper", "cloud primary with fallback"),
+                ("RAG", "Milvus Lite", "LangChain retrieval"),
+            ],
+        )
         tabs = st.tabs([
-            "📁  New audit",
-            "📋  History",
-            "🔍  Session detail",
-            "📊  My scores",
+            "New Audit",
+            "History",
+            "Session Detail",
+            "My Scores",
         ])
         with tabs[0]: self._new_audit()
         with tabs[1]: self._history_tab()
@@ -85,7 +102,7 @@ class AgentPanel:
         The Ingestion Tab.
         Handles file uploads and triggers the SamiX analysis pipeline.
         """
-        st.markdown('<div class="section-header">NEW AUDIT</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">New Audit</div>', unsafe_allow_html=True)
 
         col_up, col_info = st.columns([3, 2], gap="large")
 
@@ -109,7 +126,7 @@ class AgentPanel:
                 mode = st.radio("Audit Mode", ["📂 File Upload", "🎤 Live Call"], horizontal=True)
 
                 if mode == "📂 File Upload":
-                    if st.button("🔍  Analyse with SamiX", width="stretch", type="primary"):
+                    if st.button("🔍  Analyse with SamiX", use_container_width=True, type="primary"):
                         asyncio.run(self._run_audit(uploaded.name, uploaded.getvalue()))
                 else:
                     self._live_call_workspace()
@@ -160,7 +177,7 @@ class AgentPanel:
 
     # TAB 2 — History
     def _history_tab(self) -> None:
-        st.markdown('<div class="section-header">SESSION HISTORY</div>',
+        st.markdown('<div class="section-header">Session History</div>',
                     unsafe_allow_html=True)
 
         sessions = self._history.get_all()
@@ -202,7 +219,7 @@ class AgentPanel:
         )
 
         sel = st.dataframe(
-            df[vis], width="stretch", hide_index=True,
+            df[vis], use_container_width=True, hide_index=True,
             on_select="rerun", selection_mode="single-row",
         )
         if sel and sel.selection and sel.selection.rows:
@@ -286,7 +303,7 @@ class AgentPanel:
             st.markdown(html_summary, unsafe_allow_html=True)
 
         with col_b:
-            if st.button("▶ Smart Summary", width="stretch", key="smart_sum"):
+            if st.button("▶ Smart Summary", use_container_width=True, key="smart_sum"):
                 with st.spinner("Generating audio via pydub…"):
                     aud_text = session.summary_customer_query if session.summary_customer_query else (session.summary or "")
                     text = self._audio.generate_text_summary(
@@ -429,9 +446,11 @@ class AgentPanel:
         )
         if query and st.button("Run RAG audit", key="run_rag"):
             with st.spinner("Retrieving from Milvus Lite…"):
-                result = self._kb.audit_chain(
-                    agent_statement=query,
-                    context_question=query,
+                result = asyncio.run(
+                    self._kb.audit_chain(
+                        agent_statement=query,
+                        context_question=query,
+                    )
                 )
             breach_colour = "#EF4444" if result["policy_breach"] else "#10B981"
             breach_label  = "POLICY BREACH DETECTED" if result["policy_breach"] else "COMPLIANT"
@@ -514,7 +533,7 @@ class AgentPanel:
             "⬇ PDF", data=pdf_bytes,
             file_name=f"{base}_audit.pdf",
             mime="application/pdf",
-            width="stretch",
+            use_container_width=True,
         )
 
         # Excel
@@ -523,7 +542,7 @@ class AgentPanel:
             "⬇ Excel", data=xlsx_bytes,
             file_name=f"{base}_audit.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width="stretch",
+            use_container_width=True,
         )
 
         # JSON
@@ -533,7 +552,7 @@ class AgentPanel:
             data=json.dumps(dataclasses.asdict(session), indent=2, default=str).encode(),
             file_name=f"{base}_audit.json",
             mime="application/json",
-            width="stretch",
+            use_container_width=True,
         )
 
         # TXT
@@ -542,7 +561,7 @@ class AgentPanel:
             data=self._build_txt(session).encode(),
             file_name=f"{base}_audit.txt",
             mime="text/plain",
-            width="stretch",
+            use_container_width=True,
         )
 
         # CSV scores
@@ -566,7 +585,7 @@ class AgentPanel:
 
         st.markdown("---")
         if st.button("📧 Email report to supervisor"):
-            to = st.text_input("Recipient email", "supervisor@company.com", key="rep_email")
+            to = st.text_input("Recipient email", "anandkumarkambar@gmail.com", key="rep_email")
             if to:
                 self._alerts.send_custom(
                     to=to,
@@ -615,7 +634,7 @@ class AgentPanel:
             xaxis=dict(gridcolor="rgba(0,0,0,0)"),
             showlegend=False,
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
     # Helpers 
     def _pipeline_strip(self) -> None:
@@ -678,7 +697,7 @@ class AgentPanel:
                             if suggs:
                                 st.session_state.live_suggestions = suggs
 
-            if st.button("🛑 End Call & Audit", width="stretch", type="primary"):
+            if st.button("🛑 End Call & Audit", use_container_width=True, type="primary"):
                 if st.session_state.live_transcript and len(st.session_state.live_transcript) > 0:
                     # Validate transcript turns have required fields
                     try:
@@ -718,10 +737,89 @@ class AgentPanel:
 
     async def _run_audit(self, filename: str, file_bytes: bytes, transcript_override: list = None) -> None:
         """
+        [ASYNC] Core SamiX Pipeline orchestrator.
+        Uses FastAPI backend if SAMIX_API_URL is configured, else runs locally.
+        """
+        # ── FastAPI Backend Path ──
+        if self._api_client.is_available and transcript_override is None:
+            with st.status(f"Analysing {filename} via API…", expanded=True) as status:
+                try:
+                    st.write("📡 Sending to SamiX API backend…")
+                    result = await self._api_client.run_audit(filename, file_bytes)
+
+                    # Build session from API response
+                    session = AuditSession.new(filename, mode="upload", agent_name="Alex K.")
+                    s = result.get("scores", {})
+                    session.scores = AuditScores(
+                        empathy=s.get("empathy", 5.0),
+                        professionalism=s.get("professionalism", 5.0),
+                        compliance=s.get("compliance", 5.0),
+                        resolution=s.get("resolution", 5.0),
+                        communication=s.get("communication", 5.0),
+                        integrity=s.get("integrity", 5.0),
+                        opening=s.get("opening", 5.0),
+                        middle=s.get("middle", 5.0),
+                        closing=s.get("closing", 5.0),
+                        phase_bonus=s.get("phase_bonus", 0.0),
+                        final_score=s.get("final_score", 50.0),
+                        verdict=s.get("verdict", "Needs work"),
+                        customer_sentiment=s.get("customer_sentiment", []),
+                        customer_overall=s.get("customer_overall", 5.0),
+                        agent_by_turn=s.get("agent_by_turn", []),
+                    )
+                    sm = result.get("summary", {})
+                    session.summary_customer_query = sm.get("customer_query", "")
+                    session.summary_sub_queries = sm.get("sub_queries", [])
+                    session.summary_query_category = sm.get("query_category", "")
+                    session.summary_customer_expectation = sm.get("customer_expectation", "")
+                    session.summary_phases = sm.get("phases", {})
+                    session.summary_key_moments = sm.get("key_moments", [])
+                    session.violations = len(result.get("violations", []))
+                    session.wrong_turns = [
+                        WrongTurn(**wt) for wt in result.get("wrong_turns", [])
+                    ]
+                    session.token_count = result.get("token_count", 0)
+                    session.cost_usd = result.get("cost_usd", 0.0)
+                    session.duration_sec = result.get("duration_sec", 0)
+                    session.engine_a = EngineAResult(
+                        primary_query_answered=result.get("engine_a", {}).get("primary_query_answered", False),
+                        sub_queries_addressed=result.get("engine_a", {}).get("sub_queries_addressed", False),
+                        is_fake_close=result.get("engine_a", {}).get("is_fake_close", False),
+                        resolution_state=result.get("engine_a", {}).get("resolution_state", "Unknown"),
+                    )
+                    eb_data = result.get("engine_b", {})
+                    session.engine_b = EngineBResult(claims=[
+                        EngineBClaim(**c) for c in eb_data.get("claims", [])
+                    ])
+                    ec_data = result.get("engine_c", {})
+                    session.engine_c = EngineCResult(
+                        customer_frustrated_but_ok=ec_data.get("customer_frustrated_but_ok", False),
+                        agent_rushed=ec_data.get("agent_rushed", False),
+                        resolution_confirmed_by_customer=ec_data.get("resolution_confirmed_by_customer", False),
+                    )
+
+                    self._history.save(session)
+                    st.session_state["active_session_id"] = session.session_id
+
+                    status.update(
+                        label=f"✅ Audit complete — {session.scores.verdict}",
+                        state="complete",
+                    )
+                    st.toast(
+                        f"{filename} · {session.scores.final_score:.0f}/100 · {session.scores.verdict}",
+                        icon="✅" if session.scores.final_score >= 60 else "⚠️",
+                    )
+                    return
+                except Exception as exc:
+                    st.warning(f"API call failed ({exc}), falling back to local processing…")
+
+        # ── Local Processing Path (original) ──
+        """
         [ASYNC] The core SamiX Pipeline orchestrator.
         Uses asyncio.gather for high-speed concurrent summarization and scoring.
         """
         with st.status(f"Analysing {filename}…", expanded=True) as status:
+            session = AuditSession.new(filename, mode="upload", agent_name="Alex K.")
             duration = 0
             if transcript_override is None:
                 st.write("⚙ pydub — converting audio…")
@@ -734,7 +832,7 @@ class AgentPanel:
                     fh.write(file_bytes)
 
                 st.write("🎙 Transcribing with speaker separation…")
-                turns = await self._stt.process(file_bytes, filename)
+                turns = await self._stt.process(file_bytes, filename, session_id=session.session_id)
             else:
                 turns = transcript_override if transcript_override else []
                 # Calculate duration more accurately for live calls
@@ -747,7 +845,7 @@ class AgentPanel:
 
             st.write("🤖 Groq High-Speed Analysis (Dual-Call Async)…")
             # CONCURRENT CALLS: Summarize and Score at the same time!
-            summary_task = self._groq.summarise(tx_text)
+            summary_task = self._groq.summarise(tx_text, session_id=session.session_id)
             
             # Note: Scoring needs the summary in the current prompt logic, 
             # but we can try to run them in parallel if we slightly modify the prompt or 
@@ -755,8 +853,24 @@ class AgentPanel:
             st.write("  ↳ Step 1: Contextual Summarization...")
             summary = await summary_task
             
-            st.write("  ↳ Step 2: Quality Auditing & Groundedness...")
-            scoring = await self._groq.score(tx_text, summary)
+            st.write("  ↳ Step 2: Retrieving Policy Context from KB (RAG)...")
+            # [Classic RAG - Stage 2: Retrieval] Fetch relevant chunks
+            rag_results = await self._kb.query(
+                question=summary.customer_query + " " + " ".join(summary.sub_queries),
+                top_k=6,
+            )
+            rag_context_text = "\n\n".join(
+                f"[{r.source} | {r.collection} | conf {r.score:.2f}]\n{r.text}"
+                for r in rag_results
+            )
+
+            st.write("  ↳ Step 3: LLM Audit with RAG Grounding (Groq)...")
+            # [Classic RAG - Stage 3: Generation] Score using transcript + retrieved context
+            scoring = await self._groq.score(
+                tx_text, summary,
+                rag_context=rag_context_text,
+                session_id=session.session_id,
+            )
 
             st.write("📚 RAG verification via Milvus Lite…")
             rag_tasks = []
@@ -777,7 +891,6 @@ class AgentPanel:
                     st.warning(f"RAG verification error: {e}")
 
             st.write("💾 Storing session (filename preserved)…")
-            session = AuditSession.new(filename, mode="upload", agent_name="Alex K.")
             session.transcript   = turns
             session.scores       = scoring.scores
             session.summary_customer_query       = summary.customer_query

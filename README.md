@@ -1,256 +1,167 @@
-# SamiX ~ samiksha
-## GenAI-Powered Customer Support Quality Auditor
-> *The All-Seeing Eye of Quality* · ಸಮೀಕ್ಷೆ
+# SamiX - GenAI-Powered Customer Support Quality Auditor
 
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Streamlit](https://img.shields.io/badge/Built_with-Streamlit-FF4B4B.svg)](https://streamlit.io)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+SamiX is a modern, AI-driven platform for auditing customer support interactions (audio and transcripts). It automates quality assurance by transcribing calls, evaluating agent performance against complex QA rubrics, and verifying factual statements against a dynamic knowledge base.
+
+SamiX has recently been upgraded to a decoupled architecture:
+- **FastAPI Backend**: Handles heavy AI processing (STT, LLM inference, RAG Retrieval).
+- **Streamlit Frontend**: A lightweight, lightning-fast UI client for agents and admins.
 
 ---
 
-## 🚀 Quick Start (< 5 minutes)
+## 🏗 Architecture
 
-### Option 1: Automatic Setup (Easiest)
-```bash
-python quickstart.py  # Does everything for you!
+### 1. Stage 1: Indexing (Knowledge Base)
+- **Documents**: PDF/TXT policies
+- **Chunking**: `RecursiveCharacterTextSplitter`
+- **Embeddings**: `BAAI/bge-small-en-v1.5`
+- **Vector DB**: `Milvus Lite` (with automatic BM25 keyword fallback)
+
+### 2. Stage 2: Retrieval (Classic RAG)
+- **Query**: Agent statements or customer questions
+- **Search**: Hybrid (Semantic similarity via Milvus + BM25 keyword overlap)
+- **Fusion**: Reciprocal Rank Fusion (RRF)
+- **Reranking**: `cross-encoder/ms-marco-MiniLM-L-6-v2` ensures incredibly high precision.
+
+### 3. Stage 3: Generation (Audit & Scoring)
+- **Prompt Construction**: Injects retrieved policy context directly into the prompt.
+- **LLM**: `Groq` (`llama-3.3-70b-versatile`)
+- **Output**: Structured JSON report grading empathy, compliance, resolution, and factual integrity.
+
+### 4. Stage 4: Transcription (STT)
+- **Primary**: `Deepgram Nova-3`
+- **Fallback**: Local `openai-whisper`
+
+---
+
+## 🚀 Quick Start (Local Development)
+
+### 1. Prerequisites
+- `Python 3.11+`
+- `FFmpeg` installed and available on `PATH` (required for audio conversion)
+- Internet access (for downloading embedding/reranker models on first run)
+
+### 2. Environment Setup
+
+Create a `.env` file in the root directory:
+
+```env
+# AI Models
+GROQ_API_KEY=gsk_your_key_here
+DEEPGRAM_API_KEY=your_deepgram_key_here
+
+# Optional: HuggingFace Token for higher rate limits on model downloads
+HF_TOKEN=hf_your_token_here
+
+# Database
+SQLITE_DB_PATH=samix.db
+
+# Optional: If you want to force Streamlit to use the FastAPI backend locally
+# SAMIX_API_URL=http://localhost:8000
 ```
 
-### Option 2: Manual Setup
-
-**Prerequisites:**
-- Python 3.11+ ([download](https://www.python.org/downloads/))
-- Git ([download](https://git-scm.com/download/win))
-- FFmpeg ([download](https://ffmpeg.org/download.html)) - Add to PATH!
+### 3. Installation
 
 **Windows:**
 ```bat
 python -m venv venv
 venv\Scripts\activate
-pip install --upgrade pip
 pip install -r requirements.txt
-python generate_hash.py
-streamlit run app.py
+python scripts\init_db.py
 ```
 
-**Linux/macOS:**
+**Linux / macOS:**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
-python generate_hash.py
-streamlit run app.py
+python scripts/init_db.py
 ```
 
-**Open:** http://localhost:8501
+### 4. Running the Application
 
-**Default Login:** admin@samix.ai / admin
+SamiX can run as a standalone Streamlit app, or as a decoupled Client/Server setup.
 
----
-
-## 📋 Next Steps
-
-### 1. Get API Keys
-- **Groq API:** https://console.groq.com/keys
-- **Deepgram STT:** https://console.deepgram.com/console/keys (optional)
-
-### 2. Configure
-Edit `.env` with your API keys:
-```env
-GROQ_API_KEY=gsk_your_key_here
-DEEPGRAM_API_KEY=your_key_here
-```
-
-### 3. Validate Setup
-```bash
-python validate.py
-```
-
-### 4. Run
+**Option A: Unified Standalone (Easiest for local Dev)**
+Just run the Streamlit app. It will process audio, LLM requests, and RAG locally within the Streamlit session.
 ```bash
 streamlit run app.py
 ```
 
----
+**Option B: Client / Server Architecture (Recommended for Production)**
+1. Open Terminal 1 and start the FastAPI Backend:
+   ```bash
+   uvicorn api.main:app --reload
+   ```
+2. Open Terminal 2, ensure `SAMIX_API_URL=http://localhost:8000` is set in your `.env`, and start the Frontend:
+   ```bash
+   streamlit run app.py
+   ```
 
-## ☁️ Deploy to Cloud (Free!)
+**Default Login:**
+- **Email:** `admin@samix.ai`
+- **Password:** `admin`
 
-### Streamlit Cloud (Recommended)
-1. Push code to GitHub (secrets auto-excluded)
-2. Go to https://share.streamlit.io
-3. Click "New app" → Select your repo
-4. Add secrets via "Advanced settings"
-5. Live in ~2 minutes! 🎉
-
-### Docker
-```bash
-docker-compose up --build
-```
-
-### Heroku
-```bash
-git push heroku main
-```
-
-See `DEPLOYMENT.md` for all options (AWS, Google Cloud, etc.)
+*(To change passwords, run `python generate_hash.py`, paste your new password, and copy the hash into `.streamlit/secrets.toml`)*
 
 ---
 
-## 📁 Project Structure
+## ☁️ Free Cloud Deployment Guide
 
+You can host SamiX entirely for free using Render.com and Streamlit Community Cloud.
+
+### Step 1: Deploy FastAPI Backend to Render.com
+1. Create a free account at [Render.com](https://render.com).
+2. Click **New +** → **Blueprint**.
+3. Connect your GitHub repository containing the SamiX codebase.
+4. Render will read the `render.yaml` file and automatically provision a Web Service.
+5. Once created, go to the Service **Environment** tab and explicitly add your secret keys:
+   - `GROQ_API_KEY`
+   - `DEEPGRAM_API_KEY`
+   - `HF_TOKEN` (optional)
+6. Copy the deployed URL (e.g., `https://samix-api.onrender.com`).
+
+*(Note: Render's free tier spins down after 15 minutes of inactivity. The first request after sleeping will take ~30-50 seconds as the server wakes up).*
+
+### Step 2: Deploy Streamlit UI to Streamlit Community Cloud
+1. Create a free account at [Streamlit Cloud](https://share.streamlit.io).
+2. Click **New app** and connect your GitHub repository.
+3. Set the Main file path to `app.py`.
+4. Click **Advanced settings** and configure your secrets in TOML format:
+
+```toml
+[auth]
+hashed_password   = "$2b$12$YOUR_BCRYPT_HASH_HERE"
+cookie_key        = "samix_super_secret_cookie_key_change_this"
+
+# Configure Streamlit to use your new Render FastAPI backend:
+SAMIX_API_URL = "https://samix-api.onrender.com"
 ```
+
+5. Click **Deploy**.
+
+The app is now fully decoupled and ready for production usage. Streamlit handles the lightweight UI, while Render handles the heavy STT/RAG computations asynchronously!
+
+---
+
+## 🛠 Project Structure
+
+```text
 samix/
-├── app.py                      ← Entry point
-├── config.py                   ← Configuration management
-├── validate.py                 ← Pre-flight checks
-├── quickstart.py               ← Auto-setup script
-├── generate_hash.py            ← Password hashing
-│
-├── .env                        ← Environment variables (⚠ not in git)
-├── .streamlit/
-│   ├── config.toml            ← Streamlit settings
-│   └── secrets.toml           ← Secrets (⚠ not in git)
-├── .gitignore                 ← Excludes sensitive files
-│
-├── src/
-│   ├── auth/
-│   │   └── authenticator.py   ← Auth manager
-│   ├── pipeline/
-│   │   ├── groq_client.py     ← LLM inference
-│   │   ├── stt_processor.py   ← Speech-to-text
-│   │   └── alert_engine.py    ← Alerts system
-│   ├── ui/
-│   │   ├── login_page.py      ← Login UI
-│   │   ├── agent_panel.py     ← Agent dashboard
-│   │   ├── admin_panel.py     ← Admin dashboard
-│   │   ├── components.py      ← UI components
-│   │   └── styles.py          ← CSS/styling
-│   └── utils/
-│       ├── kb_manager.py      ← Knowledge base + RAG
-│       ├── history_manager.py ← Audit records
-│       ├── cost_tracker.py    ← API cost tracking
-│       ├── audio_processor.py ← Audio utilities
-│       └── report_generator.py ← Report generation
-│
-├── data/
-│   ├── auth/users.yaml        ← User database
-│   ├── kb/                    ← Knowledge base files
-│   ├── history/               ← Audit records (JSON)
-│   └── uploads/               ← Uploaded audio/transcripts
-│
-├── Dockerfile                 ← Docker config
-├── docker-compose.yml         ← Docker Compose
-├── requirements.txt           ← Python dependencies
-├── DEPLOYMENT.md              ← Deployment guide
-├── PRODUCTION_GUIDE.md        ← Production setup
-├── TROUBLESHOOTING.md         ← Troubleshooting
-└── QUICKSTART.md              ← Quick reference
+├── api/                   # FastAPI Backend
+│   ├── main.py            # API Endpoints (/audit, /rag/query, /health)
+│   ├── schemas.py         # Pydantic Request/Response models
+│   ├── deps.py            # Dependency Injection
+│   └── requirements.txt   # Backend-only dependencies
+├── src/                   # Core Logic & Frontend
+│   ├── api_client.py      # HTTPX wrapper connecting Streamlit to FastAPI
+│   ├── auth/              # Authentication protocols
+│   ├── db/                # SQLite Data Layer
+│   ├── pipeline/          # Groq LLM and Deepgram STT Processors
+│   ├── ui/                # Streamlit UI Components & Workspaces
+│   └── utils/             # KBManager, HistoryManager, CostTracking
+├── data/                  # Local Storage (DB, uploads, KB chunks, artifacts)
+├── app.py                 # Streamlit Entry Point
+├── config.py              # Environment configuration loader
+├── render.yaml            # Render.com IaC Deployment Blueprint
+└── requirements.txt       # Global Dependencies
 ```
-
----
-
-## 📚 Documentation
-
-| Document | Purpose |
-|----------|---------|
-| `QUICKSTART.md` | Quick reference & common tasks |
-| `DEPLOYMENT.md` | Deploy to Streamlit Cloud, Heroku, AWS, GCP |
-| `PRODUCTION_GUIDE.md` | Production setup & security |
-| `TROUBLESHOOTING.md` | Common issues & fixes |
-| `DEPLOYMENT_AWS.md` | Detailed AWS deployment (if available) |
-
----
-
-## ✨ Features
-
-- **Multi-Engine AI Analysis**: Groq Llama-3 with dual-pass quality auditing
-- **Speech-to-Text Pipeline**: Deepgram (cloud) + Whisper (local fallback)
-- **Vector RAG**: Milvus Lite with HuggingFace embeddings
-- **Premium UI**: Dark theme with responsive design
-- **Secure Auth**: Bcrypt password hashing + session management
-- **Cost Tracking**: Real-time API usage & billing
-- **Scalable**: Docker, Heroku, Streamlit Cloud, AWS support
-
----
-
-## 🔧 Configuration
-
-### Environment Variables (.env)
-├── .gitignore
-├── .streamlit/
-│   ├── config.toml               ← Deep Slate dark theme
-│   └── secrets.toml              ← NEVER commit · listed in .gitignore
-├── src/
-│   ├── auth/
-│   │   └── authenticator.py      ← streamlit-authenticator wrapper
-│   ├── pipeline/
-│   │   ├── groq_client.py        ← dual-call LLM (mock fallback)
-│   │   ├── stt_processor.py      ← Deepgram + Whisper + chat parser
-│   │   └── alert_engine.py       ← st.toast + SMTP email
-│   ├── ui/
-│   │   ├── styles.py             ← CSS injection (Deep Slate theme)
-│   │   ├── components.py         ← gauges, charts, transcript, cost card
-│   │   ├── login_page.py         ← professional login screen
-│   │   ├── agent_panel.py        ← client workspace
-│   │   └── admin_panel.py        ← admin dashboard
-│   └── utils/
-│       ├── history_manager.py    ← JSON persistence · filename consistency
-│       ├── audio_processor.py    ← pydub + TTS summary
-│       ├── cost_tracker.py       ← token × price → profit/loss
-│       └── kb_manager.py         ← Milvus Lite RAG KB
-└── data/
-    ├── history/                  ← audit JSON files
-    ├── kb/                       ← indexed KB documents
-    └── uploads/                  ← raw uploaded files
-```
-
----
-
-## Features
-
-| Feature | Implementation |
-|---|---|
-| Secure login | streamlit-authenticator · bcrypt hash in secrets.toml |
-| Speaker separation | Deepgram diarize=true · Twilio dual-stream for live |
-| Filename consistency | uploaded name = stored name = history name = report name |
-| Audio player + summary | pydub WAV 16kHz · gTTS / pyttsx3 synthesis |
-| Dual scoring | Agent QA 0–100 · Customer sentiment 0–10 per turn |
-| ECharts gauges | Empathy · Professionalism · Compliance |
-| Dual score chart | Plotly · red-zone markers · hover breakdown |
-| Where it went wrong | Exact turn · verbatim quote · wrong fact · correct fact · specific correction |
-| RAG KB | Milvus Lite · LangChain · all-MiniLM-L6-v2 · PDF/TXT upload |
-| Generalised KB | ITIL · ISO 9001 · GDPR · de-escalation · 50 empathy phrases |
-| Alert system | st.toast (screen pop) · SMTP email |
-| Cost evaluation | Token count × price · profit/loss per audit |
-| Download report | TXT · JSON · CSV · email |
-| Admin: model perf | Groq latency · scoring accuracy · STT stats · RAG stats |
-| Admin: users | Usage · growth · churn · email action |
-| Admin: billing | Revenue vs cost · send invoice emails · margin |
-| Admin: RAG KB | Upload · index · delete files · collection tags |
-| Admin: system health | Service uptime · latency chart · queue stats |
-
----
-
-## API keys (all free tiers sufficient for development)
-
-| Service | Free tier | Link |
-|---|---|---|
-| Groq | ~14,400 requests/day | https://console.groq.com |
-| Deepgram | $200 credit | https://console.deepgram.com |
-| Streamlit Cloud | Unlimited public apps | https://share.streamlit.io |
-
-Whisper, Milvus Lite, pydub, gTTS — all free, no account needed.
-
----
-
-## Troubleshooting
-
-**`pydub` audio error** — Install FFmpeg and add to PATH.
-
-**`streamlit-authenticator` import error** — Run `pip install streamlit-authenticator==0.3.2`
-
-**`sentence-transformers` slow first run** — It downloads the MiniLM model (~90 MB) once.
-
-**Groq mock data showing** — Check your Groq API key in secrets.toml starts with `gsk_` (not `gsk_REPLACE`).
-
-**Login not working** — Re-run `python generate_hash.py`, copy the new hash exactly into secrets.toml.

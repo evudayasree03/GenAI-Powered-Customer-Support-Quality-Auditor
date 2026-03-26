@@ -19,6 +19,34 @@ from src.utils.history_manager import (
 )
 
 
+def render_page_hero(
+    eyebrow: str,
+    title: str,
+    subtitle: str,
+    stats: Optional[list[tuple[str, str, str]]] = None,
+) -> None:
+    """Reusable page hero for production-friendly Streamlit screens."""
+    html = [
+        '<div class="samix-hero">',
+        f'<div class="samix-eyebrow">{eyebrow}</div>',
+        f'<div class="samix-title">{title}</div>',
+        f'<div class="samix-subtitle">{subtitle}</div>',
+    ]
+    if stats:
+        html.append('<div class="samix-kpi-grid">')
+        for label, value, note in stats:
+            html.append(
+                '<div class="samix-kpi-card">'
+                f'<div class="samix-kpi-label">{label}</div>'
+                f'<div class="samix-kpi-value">{value}</div>'
+                f'<div class="samix-kpi-note">{note}</div>'
+                '</div>'
+            )
+        html.append('</div>')
+    html.append('</div>')
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
 # ECharts Gauges 
 
 def render_gauge(value: float, title: str, max_val: float = 10.0) -> None:
@@ -185,7 +213,7 @@ def render_dual_score_chart(scores: AuditScores) -> None:
         hovermode="x unified",
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # Transcript Renderer 
@@ -455,7 +483,7 @@ def render_hero_section(
     # CTA Button (using Streamlit's native button)
     col1, col2, col3 = st.columns([1.2, 2, 2])
     with col1:
-        clicked = st.button(cta_label, key=cta_key, width="stretch")
+        clicked = st.button(cta_label, key=cta_key, use_container_width=True)
     
     st.markdown(f'</div>', unsafe_allow_html=True)
     return clicked

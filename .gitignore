@@ -1,5 +1,13 @@
 # Secrets — NEVER commit these
 .streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
 # Python
 __pycache__/
@@ -19,18 +27,34 @@ build/
 venv/
 env/
 .venv/
-.env
 .env/
 ENV/
 
-# Data (user uploads + history — keep gitkeep only)
-data/uploads/*
+# Databases and local vector stores
+samix.db
+samix_backup.db
+milvus_lite.db
+*.sqlite
+*.sqlite3
+*.db
+
+# Data (runtime/user data — keep gitkeep only where present)
+data/api_responses/*
+data/backups/*
+data/exports/*
 data/history/*
+data/uploads/*
+data/auth/*
+data/uploads/*
 data/kb/*.pdf
 data/kb/*.txt
 data/kb/*.db
 data/kb/*.chunks.txt
 data/kb/kb_meta.json
+!data/auth/.gitkeep
+!data/api_responses/.gitkeep
+!data/backups/.gitkeep
+!data/exports/.gitkeep
 !data/uploads/.gitkeep
 !data/history/.gitkeep
 !data/kb/.gitkeep
@@ -49,5 +73,4 @@ desktop.ini
 # Logs
 *.log
 *.pid
-venv/
-.env
+logs/

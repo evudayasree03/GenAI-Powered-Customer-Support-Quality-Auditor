@@ -1,169 +1,162 @@
 """
-SamiX Pre-Flight Validation Script
-
-Validates that the environment is properly configured before running the application.
-Run this script to diagnose configuration issues.
-
-Usage:
-    python validate.py
+SamiX pre-flight validation script.
 """
-import sys
-import os
-from pathlib import Path
-from importlib import import_module
+from __future__ import annotations
 
-def check_python_version():
-    """Verify Python version is 3.11 or higher."""
+import sys
+from importlib import import_module
+from pathlib import Path
+
+
+def out(message: str) -> None:
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        print(message.encode("ascii", errors="replace").decode("ascii"))
+
+
+def check_python_version() -> bool:
     version = sys.version_info
     if version.major < 3 or (version.major == 3 and version.minor < 11):
-        print(f"❌ Python {version.major}.{version.minor} detected")
-        print(f"   Required: Python 3.11+")
+        out(f"[FAIL] Python {version.major}.{version.minor} detected")
+        out("       Python 3.11+ is required")
         return False
-    print(f"✓ Python {version.major}.{version.minor}.{version.micro}")
+    out(f"[PASS] Python {version.major}.{version.minor}.{version.micro}")
     return True
 
-def check_directories():
-    """Verify all required directories exist."""
+
+def check_directories() -> bool:
     required_dirs = [
         "data",
+        "data/api_responses",
+        "data/api_responses/transcriptions",
+        "data/api_responses/llm_scores",
         "data/auth",
-        "data/kb",
+        "data/backups",
+        "data/exports",
         "data/history",
+        "data/kb",
         "data/uploads",
         "src",
         "src/auth",
+        "src/db",
         "src/pipeline",
+        "src/storage",
         "src/ui",
         "src/utils",
         ".streamlit",
     ]
-    
     ok = True
     for dir_path in required_dirs:
         if Path(dir_path).exists():
-            print(f"✓ {dir_path}/")
+            out(f"[PASS] {dir_path}/")
         else:
-            print(f"❌ {dir_path}/ (missing)")
+            out(f"[FAIL] {dir_path}/ (missing)")
             ok = False
-    
     return ok
 
-def check_files():
-    """Verify all critical files exist."""
+
+def check_files() -> bool:
     required_files = [
         "app.py",
         "config.py",
         "requirements.txt",
-        ".env",
-        ".streamlit/secrets.toml",
+        "src/db/schema.sql",
+        "src/db/db_manager.py",
+        "src/storage/file_storage.py",
         "src/auth/authenticator.py",
         "src/pipeline/groq_client.py",
         "src/pipeline/stt_processor.py",
+        "src/pipeline/alert_engine.py",
         "src/ui/login_page.py",
+        "src/ui/agent_panel.py",
+        "src/ui/admin_panel.py",
+        "src/ui/styles.py",
         "src/utils/kb_manager.py",
     ]
-    
     ok = True
     for file_path in required_files:
         if Path(file_path).exists():
-            print(f"✓ {file_path}")
+            out(f"[PASS] {file_path}")
         else:
-            print(f"❌ {file_path} (missing)")
+            out(f"[FAIL] {file_path} (missing)")
             ok = False
-    
     return ok
 
-def check_dependencies():
-    """Verify all required packages are installed."""
-    required_packages = [
-        "streamlit",
-        "groq",
-        "streamlit_authenticator",
-        "langchain",
-        "pymilvus",
-        "bcrypt",
-        "pydub",
-        "dotenv",
-        "yaml",
-    ]
-    
-    print("\nChecking dependencies...")
-    missing = []
-    
-    for package in required_packages:
+
+def check_dependencies() -> bool:
+    required_packages = {
+        "streamlit": "streamlit",
+        "groq": "groq",
+        "streamlit_authenticator": "streamlit_authenticator",
+        "langchain": "langchain",
+        "pymilvus": "pymilvus",
+        "bcrypt": "bcrypt",
+        "pydub": "pydub",
+        "dotenv": "dotenv",
+        "yaml": "yaml",
+    }
+    out("\nChecking dependencies...")
+    missing: list[str] = []
+    for package, module_name in required_packages.items():
         try:
-            import_module(package)
-            print(f"✓ {package}")
+            import_module(module_name)
+            out(f"[PASS] {package}")
         except ImportError:
-            print(f"❌ {package} (not installed)")
+            out(f"[FAIL] {package} (not installed)")
             missing.append(package)
-    
     if missing:
-        print(f"\n⚠ Missing packages: {', '.join(missing)}")
-        print(f"Install with: pip install {' '.join(missing)}")
+        out(f"\n[WARN] Missing packages: {', '.join(missing)}")
+        out(f"       Install with: pip install {' '.join(missing)}")
         return False
-    
     return True
 
-def check_environment_variables():
-    """Check for required API keys."""
-    print("\nChecking environment variables...")
-    
-    # Try loading from config
+
+def check_environment_variables() -> bool:
+    out("\nChecking environment variables...")
     try:
         from config import Config
-        
+
         groq_key = Config.get_groq_api_key()
         if groq_key == "NOT_CONFIGURED" or "your_" in groq_key.lower():
-            print("❌ GROQ_API_KEY not configured")
+            out("[FAIL] GROQ_API_KEY not configured")
             return False
-        else:
-            print(f"✓ GROQ_API_KEY configured (starts with: {groq_key[:8]}...)")
-        
+        out(f"[PASS] GROQ_API_KEY configured (starts with: {groq_key[:8]}...)")
+
         deepgram_key = Config.get_deepgram_api_key()
         if "your_" in deepgram_key.lower():
-            print("ℹ DEEPGRAM_API_KEY not configured (will use local Whisper)")
+            out("[INFO] DEEPGRAM_API_KEY not configured (local Whisper fallback will be used)")
         else:
-            print(f"✓ DEEPGRAM_API_KEY configured (starts with: {deepgram_key[:8]}...)")
-        
+            out(f"[PASS] DEEPGRAM_API_KEY configured (starts with: {deepgram_key[:8]}...)")
         return True
-    except Exception as e:
-        print(f"❌ Error loading config: {e}")
+    except Exception as exc:
+        out(f"[FAIL] Error loading config: {exc}")
         return False
 
-def check_file_permissions():
-    """Verify write permissions for required directories."""
-    print("\nChecking file permissions...")
-    
-    writable_dirs = [
-        "data",
-        "logs",
-        ".streamlit",
-    ]
-    
+
+def check_file_permissions() -> bool:
+    out("\nChecking file permissions...")
+    writable_dirs = ["data", "logs", ".streamlit"]
     ok = True
     for dir_path in writable_dirs:
         path = Path(dir_path)
-        if not path.exists():
-            path.mkdir(parents=True, exist_ok=True)
-        
+        path.mkdir(parents=True, exist_ok=True)
         test_file = path / ".write_test"
         try:
             test_file.touch()
             test_file.unlink()
-            print(f"✓ {dir_path}/ is writable")
-        except Exception as e:
-            print(f"❌ {dir_path}/ is not writable: {e}")
+            out(f"[PASS] {dir_path}/ is writable")
+        except Exception as exc:
+            out(f"[FAIL] {dir_path}/ is not writable: {exc}")
             ok = False
-    
     return ok
 
-def main():
-    """Run all validation checks."""
-    print("\n" + "="*70)
+
+def main() -> int:
+    print("\n" + "=" * 70)
     print("SamiX Pre-Flight Validation")
-    print("="*70 + "\n")
-    
+    print("=" * 70 + "\n")
+
     checks = [
         ("Python Version", check_python_version),
         ("Required Directories", check_directories),
@@ -172,40 +165,35 @@ def main():
         ("Environment Variables", check_environment_variables),
         ("File Permissions", check_file_permissions),
     ]
-    
-    results = []
-    
+
+    results: list[tuple[str, bool]] = []
     for check_name, check_func in checks:
         print(f"\n{check_name}:")
         print("-" * 70)
         try:
-            result = check_func()
-            results.append((check_name, result))
-        except Exception as e:
-            print(f"❌ Error during validation: {e}")
+            results.append((check_name, check_func()))
+        except Exception as exc:
+            out(f"[FAIL] Error during validation: {exc}")
             results.append((check_name, False))
-    
-    # Summary
-    print("\n" + "="*70)
+
+    print("\n" + "=" * 70)
     print("Validation Summary")
-    print("="*70)
-    
+    print("=" * 70)
+
     passed = sum(1 for _, result in results if result)
     total = len(results)
-    
     for check_name, result in results:
-        status = "✓ PASS" if result else "❌ FAIL"
-        print(f"{status:10} {check_name}")
-    
-    print(f"\nResult: {passed}/{total} checks passed")
-    
+        out(f"{'[PASS]' if result else '[FAIL]':8} {check_name}")
+
+    out(f"\nResult: {passed}/{total} checks passed")
     if passed == total:
-        print("\n✓ All checks passed! Ready to run:")
-        print("  streamlit run app.py")
+        out("\n[PASS] All checks passed. Ready to run:")
+        out("       streamlit run app.py")
         return 0
-    else:
-        print("\n⚠ Some checks failed. Review the errors above.")
-        return 1
+
+    out("\n[WARN] Some checks failed. Review the errors above.")
+    return 1
+
 
 if __name__ == "__main__":
     sys.exit(main())
