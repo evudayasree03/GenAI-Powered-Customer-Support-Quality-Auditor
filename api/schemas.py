@@ -1,11 +1,10 @@
 """
 SamiX API — Pydantic Schemas
-
-Request and response models for the FastAPI endpoints.
+Updated to support the Alert Engine and Production Audit Pipeline.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -19,7 +18,7 @@ class HealthResponse(BaseModel):
     kb_documents: int = 0
 
 
-# ── Audit ───────────────────────────────────────────────────────────
+# ── Audit Components ────────────────────────────────────────────────
 
 class WrongTurnOut(BaseModel):
     turn_number: int = 0
@@ -47,9 +46,9 @@ class ScoresOut(BaseModel):
     phase_bonus: float = 0.0
     final_score: float = 50.0
     verdict: str = "Needs work"
-    customer_sentiment: list[float] = []
+    customer_sentiment: List[float] = []
     customer_overall: float = 5.0
-    agent_by_turn: list[float] = []
+    agent_by_turn: List[float] = []
 
 
 class EngineAOut(BaseModel):
@@ -68,7 +67,7 @@ class EngineBClaimOut(BaseModel):
 
 
 class EngineBOut(BaseModel):
-    claims: list[EngineBClaimOut] = []
+    claims: List[EngineBClaimOut] = []
 
 
 class EngineCOut(BaseModel):
@@ -79,11 +78,11 @@ class EngineCOut(BaseModel):
 
 class SummaryOut(BaseModel):
     customer_query: str = ""
-    sub_queries: list[str] = []
+    sub_queries: List[str] = []
     query_category: str = ""
     customer_expectation: str = ""
-    phases: dict = {}
-    key_moments: list[str] = []
+    phases: Dict[str, Any] = {}
+    key_moments: List[str] = []
 
 
 class ViolationOut(BaseModel):
@@ -96,18 +95,20 @@ class AuditResponse(BaseModel):
     """Full audit result returned by POST /audit."""
     session_id: str = ""
     filename: str = ""
-    summary: SummaryOut = SummaryOut()
-    scores: ScoresOut = ScoresOut()
-    engine_a: EngineAOut = EngineAOut()
-    engine_b: EngineBOut = EngineBOut()
-    engine_c: EngineCOut = EngineCOut()
-    violations: list[ViolationOut] = []
-    wrong_turns: list[WrongTurnOut] = []
+    summary: SummaryOut = Field(default_factory=SummaryOut)
+    scores: ScoresOut = Field(default_factory=ScoresOut)
+    engine_a: EngineAOut = Field(default_factory=EngineAOut)
+    engine_b: EngineBOut = Field(default_factory=EngineBOut)
+    engine_c: EngineCOut = Field(default_factory=EngineCOut)
+    violations: List[ViolationOut] = []
+    wrong_turns: List[WrongTurnOut] = []
     token_count: int = 0
     cost_usd: float = 0.0
     duration_sec: float = 0.0
     auto_fail: bool = False
     auto_fail_reason: str = ""
+    # CRITICAL: This allows the backend to pass the triggered alert list to the UI
+    alerts: List[str] = [] 
 
 
 # ── RAG ─────────────────────────────────────────────────────────────
@@ -126,7 +127,7 @@ class RAGChunkOut(BaseModel):
 
 
 class RAGQueryResponse(BaseModel):
-    results: list[RAGChunkOut] = []
+    results: List[RAGChunkOut] = []
     groundedness: float = 0.0
 
 
