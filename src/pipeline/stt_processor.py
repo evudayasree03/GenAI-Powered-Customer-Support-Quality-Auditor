@@ -1,9 +1,7 @@
 """
-SamiX Speech-to-Text (STT) Processing Engine - Optimized for Render.com
-
-1. Removed Local Whisper/Torch (Saves 800MB+ RAM).
-2. Deepgram Nova-2 as the primary transcription engine.
-3. Lightweight mock fallback for test scenarios.
+SamiX Speech-to-Text (STT) Processing Engine - Dual-Mode Version
+- Client Mode: Sends audio to Render Backend (Streamlit Cloud safe).
+- Server Mode: Processes transcription via Deepgram (Render.com optimized).
 """
 from __future__ import annotations
 
@@ -15,8 +13,9 @@ import re
 import logging
 import time
 import uuid
+import requests
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, List
 
 # Use logging instead of st.warning for backend stability
 logger = logging.getLogger("samix.stt")
@@ -29,22 +28,30 @@ from src.utils.history_manager import TranscriptTurn
 class STTProcessor:
     AUDIO_EXTS: set[str] = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"}
     TEXT_EXTS:  set[str] = {".csv", ".json", ".txt"}
-    
-    # Confidence threshold for Deepgram
     CONF_THRESHOLD: float = 0.40
 
     def __init__(self) -> None:
-        self._deepgram = self._build_deepgram()
-        self._db = get_db()
-        self._storage = FileStorage()
+        # 1. Detect Environment
+        self.api_url = os.environ.get("BACKEND_URL")
+        self.is_client = self.api_url is not None
+
+        # 2. Conditional Initialization
+        if self.is_client:
+            logger.info(f"STT running in CLIENT mode. Routing to: {self.api_url}")
+            self._deepgram = None
+        else:
+            logger.info("STT running in SERVER mode. Initializing Deepgram...")
+            self._deepgram = self._build_deepgram()
+            self._db = get_db()
+            self._storage = FileStorage()
 
     def _build_deepgram(self) -> Optional[object]:
         try:
+            from deepgram import DeepgramClient
             key = os.environ.get("DEEPGRAM_API_KEY", "")
             if not key or "REPLACE" in key:
                 logger.error("DEEPGRAM_API_KEY missing or invalid.")
                 return None
-            from deepgram import DeepgramClient
             return DeepgramClient(key)
         except Exception as e:
             logger.error(f"Failed to build Deepgram client: {e}")
@@ -60,6 +67,11 @@ class STTProcessor:
         filename: str,
         session_id: Optional[str] = None,
     ) -> list[TranscriptTurn]:
+        """Main entry point: Automatically chooses between API call or local processing."""
+        if self.is_client:
+            return await self._process_via_api(file_bytes, filename)
+        
+        # SERVER LOGIC (Render.com)
         ext = Path(filename).suffix.lower()
         storage_session_id = session_id or str(uuid.uuid4())[:8]
         started = time.perf_counter()
@@ -80,7 +92,7 @@ class STTProcessor:
             "turns": [t.__dict__ for t in turns],
         }
 
-        # Async database and storage updates
+        # Save to DB and Storage (Only on Server)
         file_path, request_hash = self._storage.save_json("transcriptions", storage_session_id, payload)
         self._db.save_transcription(storage_session_id, filename, transcript_text, confidence_score, processor_used, "completed")
         self._db.save_api_response(
@@ -95,22 +107,30 @@ class STTProcessor:
         )
         return turns
 
-    async def process_chunk(self, audio_bytes: bytes) -> list[TranscriptTurn]:
-        """ Live chunk processing - simplified to standard Deepgram call. """
-        if not self.has_deepgram: return self._mock_turns()
-        res, _ = await self._deepgram_transcribe(audio_bytes)
-        return res or self._mock_turns()
+    async def _process_via_api(self, data: bytes, filename: str) -> list[TranscriptTurn]:
+        """Frontend logic: Proxies the request to the Render backend."""
+        try:
+            # Note: Pointing to the specific /audit endpoint on your FastAPI backend
+            files = {"file": (filename, data)}
+            response = requests.post(f"{self.api_url}/audit", files=files, timeout=60)
+            
+            if response.status_code == 200:
+                result = response.json()
+                # Reconstruct TranscriptTurn objects from JSON
+                return [TranscriptTurn(**t) for t in result.get("turns", [])]
+            else:
+                logger.error(f"API Error: {response.status_code} - {response.text}")
+                return self._mock_turns()
+        except Exception as e:
+            logger.error(f"Failed to connect to backend STT: {e}")
+            return self._mock_turns()
 
     async def _process_audio(self, data: bytes, filename: str) -> tuple[list[TranscriptTurn], str, float]:
-        # Convert audio format
         wav_data = await asyncio.to_thread(self._pydub_convert, data, filename)
-
         if self.has_deepgram:
             result, confidence = await self._deepgram_transcribe(wav_data)
             if result:
                 return result, "deepgram:nova-2", confidence
-
-        logger.warning("Deepgram failed or unavailable. Using mock fallback.")
         return self._mock_turns(), "mock:fallback", 0.50
 
     def _pydub_convert(self, data: bytes, filename: str) -> bytes:
@@ -130,15 +150,10 @@ class STTProcessor:
         try:
             from deepgram import PrerecordedOptions
             source = {"buffer": wav_data}
-            # Nova-2 is faster and highly accurate for conversation
             opts = PrerecordedOptions(model="nova-2", diarize=True, punctuate=True, language="en")
-            
-            # API Call
             resp = self._deepgram.listen.prerecorded.v("1").transcribe_file(source, opts)
             words = resp.results.channels[0].alternatives[0].words
-            
             if not words: return None, 0.0
-            
             avg_conf = sum(w.confidence for w in words) / len(words)
             return self._dg_words_to_turns(words), float(avg_conf)
         except Exception as e:
@@ -165,7 +180,6 @@ class STTProcessor:
             if spk_id not in speaker_map:
                 speaker_map[spk_id] = next(next_label, f"SPEAKER_{spk_id}")
             label = speaker_map[spk_id]
-
             if label != cur_spk:
                 flush()
                 cur_spk, cur_start = label, getattr(w, "start", 0.0)
@@ -180,7 +194,35 @@ class STTProcessor:
         if ext == ".csv": return self._parse_csv(text)
         return self._parse_plain(text)
 
-    # ... [Rest of the parsers (_parse_json, _parse_csv, _parse_plain) remain the same as they are lightweight] ...
+    def _parse_json(self, text: str) -> list[TranscriptTurn]:
+        try:
+            data = json.loads(text)
+            turns = []
+            for i, item in enumerate(data if isinstance(data, list) else [], 1):
+                turns.append(TranscriptTurn(
+                    turn=i, 
+                    speaker=item.get("speaker", "AGENT"), 
+                    text=item.get("text", ""), 
+                    timestamp=item.get("timestamp", "00:00")
+                ))
+            return turns
+        except: return self._mock_turns()
+
+    def _parse_csv(self, text: str) -> list[TranscriptTurn]:
+        import csv
+        turns = []
+        reader = csv.DictReader(io.StringIO(text))
+        for i, row in enumerate(reader, 1):
+            turns.append(TranscriptTurn(turn=i, speaker=row.get("speaker", "AGENT"), text=row.get("text", ""), timestamp=row.get("timestamp", "00:00")))
+        return turns
+
+    def _parse_plain(self, text: str) -> list[TranscriptTurn]:
+        turns = []
+        for i, line in enumerate(text.splitlines(), 1):
+            if ":" in line:
+                spk, txt = line.split(":", 1)
+                turns.append(TranscriptTurn(turn=i, speaker=spk.strip(), text=txt.strip(), timestamp="00:00"))
+        return turns
 
     @staticmethod
     def _mock_turns() -> list[TranscriptTurn]:
