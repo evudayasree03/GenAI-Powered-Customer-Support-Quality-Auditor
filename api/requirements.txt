@@ -2,15 +2,21 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-dotenv
+python-multipart
+httpx
 
 # AI & Language Models
 groq>=0.9.0
+openai>=1.12.0
 
 # Speech-to-Text
 deepgram-sdk>=3.2.0
 
-# Audio Processing
+# Audio Processing & Conversion
+# Required for wav conversion on Render/Linux
 pydub>=0.25.1
+librosa>=0.10.1
+soundfile>=0.12.1
 
 # RAG Stack
 langchain>=0.2.5
@@ -18,15 +24,14 @@ langchain-community>=0.2.5
 langchain-text-splitters>=0.2.2
 langchain-huggingface>=0.0.3
 
-# Milvus (Lite version for local file-based DB)
+# Vector Database (Milvus Lite)
 pymilvus>=2.3.0
 langchain-milvus>=0.1.7
-# We use the standard pymilvus; milvus_lite is included in recent versions
 rank_bm25>=0.2.2
 
 # Document Parsing
 pypdf>=4.2.0
 
-# Utilities
-python-multipart
-httpx
+# Data Science & Utilities
+numpy>=1.26.0
+pandas>=2.1.0
