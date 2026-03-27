@@ -1,22 +1,27 @@
-# render.yaml — Render Blueprint for auto-deploy
-# Docs: https://docs.render.com/blueprint-spec
-
 services:
+  # 1. FastAPI Backend (The Brain)
   - type: web
     name: samix-api
     runtime: python
-    region: oregon
-    plan: free
-    buildCommand: pip install -r api/requirements.txt
+    buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
       - key: GROQ_API_KEY
-        sync: false  # Set manually in Render dashboard
+        sync: false
       - key: DEEPGRAM_API_KEY
         sync: false
-      - key: HF_TOKEN
-        sync: false
-      - key: PYTHON_VERSION
-        value: "3.11.9"
-    healthCheckPath: /health
-    autoDeploy: true
+
+  # 2. Streamlit Frontend (The Face)
+  - type: web
+    name: samix-ui
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT
+    envVars:
+      - key: BACKEND_URL
+        fromService:
+          name: samix-api
+          type: web
+          property: host
