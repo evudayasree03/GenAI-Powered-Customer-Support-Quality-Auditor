@@ -10,7 +10,39 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
+# ... other imports ...
+from src.pipeline.alert_engine import AlertEngine
 
+alert_engine = AlertEngine()
+
+@app.post("/audit")
+async def run_audit(file: UploadFile = File(...)):
+    # 1. Process Audio/Text
+    turns = await stt_processor.process(await file.read(), file.filename)
+    transcript_text = transcript_to_text(turns)
+    
+    # 2. Run Groq Scoring (your existing logic)
+    summary = await groq_client.summarise(transcript_text)
+    audit_results = await groq_client.score(transcript_text, summary)
+
+    # 3. TRIGGER THE NEW ALERT ENGINE
+    # This catches the list of alert strings we just wrote in alert.py
+    alerts_triggered = await alert_engine.check_and_fire(
+        filename=file.filename,
+        agent_name="Agent", # Or extract from results
+        final_score=audit_results.scores.final_score,
+        violations=audit_results.violations,
+        auto_fail=audit_results.auto_fail,
+        auto_fail_reason=audit_results.auto_fail_reason,
+        recipient_email=os.getenv("ADMIN_EMAIL", "") 
+    )
+
+    return {
+        "status": "success",
+        "score": audit_results.scores.final_score,
+        "alerts": alerts_triggered, # CRITICAL: Sends alerts to Streamlit
+        "data": audit_results
+    }
 # Ensure project root is on sys.path so `api.*` imports work correctly on Render
 # If file is in /api/main.py, parent is /api, parent.parent is / (root)
 BASE_DIR = Path(__file__).resolve().parent
