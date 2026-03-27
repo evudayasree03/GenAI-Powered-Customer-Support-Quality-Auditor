@@ -1,222 +1,139 @@
 """
-SamiX - Quality Auditor Entry Point
-
-This is the main driver for the SamiX application. It initializes the system components,
-handles user authentication, and renders the appropriate UI (Agent or Admin) based on 
-user roles.
-
-Usage:
-    streamlit run app.py
+SamiX - Quality Auditor Entry Point (Cloud Optimized)
+Connects to the Render FastAPI backend for all heavy processing.
 """
 from __future__ import annotations
 
 import os
 import sys
+import requests
 from pathlib import Path
-import audioop
+from dotenv import load_dotenv
 
-# Disable Hugging Face telemetry and legacy warnings for a cleaner console output.
-os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+# Load environment variables
+load_dotenv()
 
-# Load configuration
-try:
-    from config import Config
-    Config.print_status()
-except Exception as e:
-    print(f"⚠ Warning: Could not load config module: {e}")
- 
 import streamlit as st
 from PIL import Image
 
-# Configure the primary page settings.
-try:
-    st.set_page_config(
-        page_title="SamiX · Quality Auditor",
-        page_icon="👁",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-except Exception as e:
-    print(f"⚠ Warning: Could not set page config: {e}")
+# --- BACKEND CONNECTION ---
+# Point this to your Render URL in Streamlit Secrets
+BACKEND_URL = st.secrets.get("BACKEND_URL", "http://localhost:8000")
 
-# Import our custom modules from the src directory with graceful fallback.
+def check_backend_health():
+    """Check if Render backend is awake."""
+    try:
+        resp = requests.get(f"{BACKEND_URL}/health", timeout=5)
+        return resp.json() if resp.status_code == 200 else None
+    except:
+        return None
+
+# Configure the primary page settings.
+st.set_page_config(
+    page_title="SamiX · Quality Auditor",
+    page_icon="👁",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Import custom UI modules (Keep these light)
 try:
     from src.auth.authenticator   import AuthManager
-    from src.pipeline.alert_engine import AlertEngine
-    from src.pipeline.groq_client  import GroqClient
-    from src.pipeline.stt_processor import STTProcessor
     from src.ui.admin_panel        import AdminPanel
     from src.ui.agent_panel        import AgentPanel
     from src.ui.login_page         import LoginPage
     from src.ui.styles             import inject_css
-    from src.utils.audio_processor import AudioProcessor
-    from src.utils.cost_tracker    import CostTracker
-    from src.utils.history_manager import HistoryManager
-    from src.utils.kb_manager      import KBManager
+    # Import the GroqClient we updated to act as a Proxy
+    from src.pipeline.groq_client  import GroqClient
 except ImportError as e:
-    st.error(f"❌ Failed to import required modules:\n\n`{e}`\n\n"
-            f"**Solution:**\n"
-            f"1. Ensure all files in `src/` directory exist\n"
-            f"2. Run: `pip install -r requirements.txt`\n"
-            f"3. Check file permissions and Python path")
-    sys.exit(1)
+    st.error(f"❌ UI Import Error: {e}")
+    st.stop()
 
-# Apply custom CSS styles to match the premium dark-themed design.
-try:
-    inject_css()
-except Exception as e:
-    print(f"⚠ Warning: Could not inject CSS: {e}")
-
+# Apply custom CSS
+inject_css()
 
 @st.cache_resource
-def _init():
-    """ Initialize and cache singleton instances of core system managers. """
+def _init_client():
+    """ 
+    Initialize components in 'Client Mode'.
+    These now point to the BACKEND_URL instead of running locally.
+    """
     return {
-        "history": HistoryManager(),
-        "groq":    GroqClient(),
-        "stt":     STTProcessor(),
-        "audio":   AudioProcessor(),
-        "cost":    CostTracker(),
-        "alerts":  AlertEngine(),
-        "kb":      KBManager(),
+        "groq": GroqClient(api_base=BACKEND_URL),
+        # Other managers will now be pass-throughs to API calls
     }
 
-
-# Global Resource container and Authentication manager.
-R    = _init()
+# Initialize resources
+R = _init_client()
 auth = AuthManager()
-R["auth"] = auth
-
+backend_status = check_backend_health()
 
 def _sidebar_brand() -> None:
-    """ Renders the SamiX branding and system status indicators in the sidebar. """
+    """ Renders sidebar with dynamic health status from the Render API. """
     with st.sidebar:
-        # Try to load custom logo from assets/images
-        logo_path = Path("assets/images/logo.png")
-        if logo_path.exists():
-            try:
-                logo = Image.open(logo_path)
-                st.image(logo, width=100)
-                st.markdown("<br>", unsafe_allow_html=True)
-            except Exception as e:
-                print(f"Could not load logo: {e}")
-                _render_default_sidebar_logo()
-        else:
-            _render_default_sidebar_logo()
+        _render_logo()
         
-        # Main Title
         st.markdown(
             '<div style="text-align:center;margin-bottom:1rem;">'
-            '<div style="font-size:1.45rem;color:#FFFFFF;letter-spacing:-0.03em;line-height:1;font-weight:800;">'
-            'SamiX</div>'
-            '<div style="font-size:0.68rem;font-weight:700;'
-            'color:#93C5FD;letter-spacing:0.16em;margin-top:0.55rem;text-transform:uppercase;">'
-            'Support Quality Platform</div></div>',
+            '<div style="font-size:1.45rem;color:#FFFFFF;font-weight:800;">SamiX</div>'
+            '<div style="font-size:0.68rem;color:#93C5FD;text-transform:uppercase;">Support Quality Platform</div></div>',
             unsafe_allow_html=True,
         )
         st.divider()
 
-        # Dynamic System Health Status
-        statuses = [
-            ("Groq API",    "LIVE"   if R["groq"].is_live         else "MOCK",    R["groq"].is_live),
-            ("Deepgram",    "LIVE"   if R["stt"].has_deepgram      else "MOCK",    R["stt"].has_deepgram),
-            ("Whisper",     "LOCAL", True),
-            ("LangChain",   "READY", True),
-            ("Milvus Lite", "VECTOR" if R["kb"].is_vector_enabled  else "KEYWORD", True),
-            ("pydub",       "ACTIVE",True),
-        ]
-        st.markdown(
-            '<div style="font-size:.7rem;font-weight:700;'
-            'color:#FFFFFF;letter-spacing:.08em;margin-bottom:.8rem;opacity:0.6;">SYSTEM STATUS</div>',
-            unsafe_allow_html=True,
-        )
-        for svc, label, ok in statuses:
+        # Dynamic System Health Status (Pulled from Render API)
+        st.markdown('<div style="font-size:.7rem;font-weight:700;opacity:0.6;">SERVER STATUS</div>', unsafe_allow_html=True)
+        
+        if backend_status:
+            services = [
+                ("API Engine", "ONLINE", True),
+                ("Groq Live", "LIVE" if backend_status.get("groq_live") else "OFF", backend_status.get("groq_live")),
+                ("Deepgram", "READY" if backend_status.get("deepgram_live") else "OFF", backend_status.get("deepgram_live")),
+                ("Vector DB", "ACTIVE" if backend_status.get("vector_enabled") else "OFF", True),
+            ]
+        else:
+            services = [("Backend", "WAKING UP...", False)]
+
+        for svc, label, ok in services:
             colour = "#10B981" if ok else "#F59E0B"
             st.markdown(
-                f'<div style="display:flex;justify-content:space-between;'
-                f'font-size:.7rem;padding:6px 0;font-weight:500;'
-                f'color:#94A3B8;">'
+                f'<div style="display:flex;justify-content:space-between;font-size:.7rem;padding:4px 0;">'
                 f'<span>{svc}</span>'
-                f'<span style="color:{colour};font-weight:700;display:flex;align-items:center;gap:4px;">'
-                f'<span style="width:6px;height:6px;border-radius:50%;background:{colour};"></span>{label}</span></div>',
+                f'<span style="color:{colour};font-weight:700;">● {label}</span></div>',
                 unsafe_allow_html=True,
             )
 
         st.divider()
-        # User account info and Logout
-        st.markdown(
-            f'<div style="font-size:.75rem;'
-            f'color:#94A3B8;margin-bottom:.8rem;font-weight:500;">'
-            f'Logged in as<br>'
-            f'<span style="color:#FFFFFF;font-weight:700;margin-top:0.25rem;display:block;">{auth.current_user_name}</span></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div style="font-size:.75rem;">Logged in as: <b>{auth.current_user_name}</b></div>', unsafe_allow_html=True)
         auth.render_logout()
 
-
-def _role() -> str:
-    """ Sidebar toggle for switching between Agent and Admin views (if authorized). """
-    with st.sidebar:
-        st.markdown("<br>", unsafe_allow_html=True)
-        role = st.radio(
-            "View as",
-            ["Agent Workspace", "Admin Workspace"],
-            index=0, horizontal=True,
-            label_visibility="collapsed",
-        )
-    return "admin" if role == "Admin Workspace" else "agent"
-
-
-def _render_default_sidebar_logo() -> None:
-    """Fallback logo for sidebar: Modern gradient badge when no custom logo found."""
-    st.markdown(
-        '<div style="'
-        'display:flex;align-items:center;gap:0.75rem;'
-        'justify-content:center;margin-bottom:1.5rem;">'
-        '<div style="'
-        'width:45px;height:45px;'
-        'background:linear-gradient(135deg,#152EAE,#2563EB);'
-        'border-radius:12px;'
-        'display:flex;align-items:center;justify-content:center;'
-        'box-shadow:0 8px 16px rgba(21, 46, 174, 0.3);'
-        '">'
-        '<span style="font-size:1.4rem;color:#fff;font-weight:800;">S</span>'
-        '</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
+def _render_logo():
+    logo_path = Path("assets/images/logo.png")
+    if logo_path.exists():
+        st.image(Image.open(logo_path), width=100)
+    else:
+        st.markdown('<div style="width:45px;height:45px;background:linear-gradient(135deg,#152EAE,#2563EB);border-radius:12px;margin:0 auto 1rem auto;display:flex;align-items:center;justify-content:center;"><span style="color:#fff;font-weight:800;">S</span></div>', unsafe_allow_html=True)
 
 def main() -> None:
-    """ Main application flow: Auth -> Sidebar -> Panel Routing. """
-    # Enforce login first.
     if not auth.is_authenticated():
         LoginPage(auth).render()
         return
 
-    # Render branding and common sidebar elements.
     _sidebar_brand()
-    role = _role()
+    
+    # Simple Role Selection
+    with st.sidebar:
+        view = st.radio("Navigation", ["Agent Workspace", "Admin Workspace"], label_visibility="collapsed")
 
-    # Route to the appropriate panel based on selected role.
-    if role == "admin":
-        AdminPanel(
-            history=R["history"],
-            kb=R["kb"],
-            alerts=R["alerts"],
-        ).render()
+    if not backend_status:
+        st.error("⚠️ The Backend Server is currently offline or waking up. Please refresh in 30 seconds.")
+        st.info("Render Free Tier sleeps after inactivity. Accessing the URL wakes it up.")
+        return
+
+    if view == "Admin Workspace":
+        AdminPanel(backend_url=BACKEND_URL).render()
     else:
-        AgentPanel(
-            history=R["history"],
-            groq=R["groq"],
-            stt=R["stt"],
-            audio=R["audio"],
-            cost=R["cost"],
-            alerts=R["alerts"],
-            kb=R["kb"],
-        ).render()
-
+        AgentPanel(backend_url=BACKEND_URL, groq=R["groq"]).render()
 
 if __name__ == "__main__":
     main()
