@@ -1,20 +1,23 @@
 """
 SamiX UI theme - Refactored for Dark Mode & Glassmorphism
 Optimized for 2026 SaaS trends and high-impact AI visualization.
+Location: src/ui/styles.py
 """
+import streamlit as st
 
+# Full CSS string with Glassmorphism and UI Overrides
 CSS = """
 <style>
 :root {
-  --bg: #0F172A; /* Deep Slate */
-  --surface: #1E293B; /* Lighter Slate */
+  --bg: #0F172A; 
+  --surface: #1E293B; 
   --surface-muted: rgba(30, 41, 59, 0.5);
-  --sidebar: #020617; /* Near Black */
+  --sidebar: #020617; 
   --text: #F1F5F9;
   --text-soft: #94A3B8;
   --text-muted: #64748B;
   --border: rgba(226, 232, 240, 0.1);
-  --primary: #6366F1; /* Indigo */
+  --primary: #6366F1; 
   --primary-soft: rgba(99, 102, 241, 0.15);
   --success: #10B981;
   --warning: #F59E0B;
@@ -48,7 +51,7 @@ section[data-testid="stSidebar"] * {
   color: var(--text-soft) !important;
 }
 
-/* Glassmorphism Shells */
+/* Glassmorphism Shells used in Dashboard */
 .samix-shell {
   background: rgba(30, 41, 59, 0.7);
   border: 1px solid var(--border);
@@ -98,14 +101,15 @@ section[data-testid="stSidebar"] * {
   border-color: var(--primary);
 }
 
-/* Metric Containers */
+/* Metric Containers Alignment */
 div[data-testid="metric-container"] {
   background: rgba(30, 41, 59, 0.4) !important;
   border: 1px solid var(--border) !important;
   border-radius: var(--radius) !important;
+  padding: 1rem !important;
 }
 
-/* Tabs */
+/* Modern Tabs */
 .stTabs [data-baseweb="tab-list"] {
   background: transparent !important;
   gap: 10px !important;
@@ -115,6 +119,7 @@ div[data-testid="metric-container"] {
   background: rgba(255, 255, 255, 0.05) !important;
   border-radius: 8px !important;
   color: var(--text-soft) !important;
+  padding: 10px 20px !important;
 }
 
 .stTabs [aria-selected="true"] {
@@ -123,21 +128,23 @@ div[data-testid="metric-container"] {
   border: 1px solid var(--primary) !important;
 }
 
-/* Buttons */
+/* Button Refinement */
 .stButton > button {
   background: var(--primary) !important;
+  color: white !important;
   border-radius: 10px !important;
   border: none !important;
   font-weight: 600 !important;
   transition: all 0.3s ease !important;
+  width: 100%;
 }
 
 .stButton > button:hover {
   box-shadow: 0 0 20px rgba(99, 102, 241, 0.4) !important;
-  transform: scale(1.02) !important;
+  transform: translateY(-1px) !important;
 }
 
-/* Inputs */
+/* Input Fields Styling */
 input, textarea, select {
   background: rgba(15, 23, 42, 0.6) !important;
   color: white !important;
@@ -147,5 +154,5 @@ input, textarea, select {
 """
 
 def inject_css() -> None:
-    import streamlit as st
+    """Injects the custom CSS into the Streamlit app."""
     st.markdown(CSS, unsafe_allow_html=True)
