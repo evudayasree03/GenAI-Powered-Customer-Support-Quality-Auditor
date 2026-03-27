@@ -1,7 +1,6 @@
 """
 SamiX - Quality Auditor Entry Point
-Location: /app.py
-Status: FIX #2 - Persistent Session Routing
+Status: Final Build - Ready for Deploy
 """
 from __future__ import annotations
 
@@ -14,6 +13,7 @@ from PIL import Image
 try:
     from src.auth.authenticator import AuthManager
     from src.db.utils import get_db_engine
+    from src.db.models import init_tables  # Added for auto-initialization
     from src.api_client import SamiXClient
     from src.ui.login_page import LoginPage
     from src.ui.dashboard import DashboardPage
@@ -70,12 +70,16 @@ def render_sidebar_header(api: SamiXClient):
             st.warning("● Backend Waking Up...")
 
 def main():
+    # 1. Trigger database and admin creation
+    init_tables() 
+    
+    # 2. UI Setup
     inject_css()
     initialize_session()
     
     managers = init_managers()
 
-    # Routing Logic
+    # 3. Routing Logic
     if not st.session_state.authenticated:
         # Show Login Page if not authenticated
         LoginPage(managers["auth"]).render()
