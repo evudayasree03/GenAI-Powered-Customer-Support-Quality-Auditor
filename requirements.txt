@@ -19,3 +19,5 @@ Pillow>=10.2.0
 
 # Database (Fix #1)
 SQLAlchemy>=2.0.25
+
+PyYAML
