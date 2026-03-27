@@ -1,6 +1,7 @@
 # ── SamiX FastAPI Backend ──
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
+python-dotenv
 
 # AI & Language Models
 groq>=0.9.0
@@ -20,17 +21,12 @@ langchain-huggingface>=0.0.3
 # Milvus (Lite version for local file-based DB)
 pymilvus>=2.3.0
 langchain-milvus>=0.1.7
-pymilvus[milvus_lite]
+# We use the standard pymilvus; milvus_lite is included in recent versions
 rank_bm25>=0.2.2
 
 # Document Parsing
 pypdf>=4.2.0
 
-# Data Processing
-pandas>=2.1.0
-numpy>=1.24.0
-
 # Utilities
-python-dotenv>=1.0.1
-httpx>=0.27.0
-python-multipart>=0.0.7
+python-multipart
+httpx
