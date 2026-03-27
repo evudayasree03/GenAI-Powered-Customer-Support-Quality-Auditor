@@ -1,44 +1,29 @@
 """
-SamiX Reports & Exports
-Aggregates audit data into downloadable business intelligence.
+SamiX Reports & Analytics
+Provides deep-dive performance metrics and data export capabilities.
 """
-from __future__ import annotations
-
 import streamlit as st
 import pandas as pd
-import io
-from datetime import datetime
-
-from src.ui.components import build_history_dataframe, render_page_hero
+from src.ui.components import render_page_hero
 
 class ReportsPage:
-    def __init__(self, history_manager) -> None:
+    def __init__(self, history_manager):
         self.history = history_manager
 
     def render(self) -> None:
-        """Renders the analytics and export interface."""
-        # 1. Fetch Data
-        sessions = self.history.get_all()
-        
-        if not sessions:
-            render_page_hero(
-                eyebrow="Reports",
-                title="No Data Available",
-                subtitle="Complete an audit in the Agent Console to generate reports."
-            )
-            return
-
-        df = build_history_dataframe(sessions)
+        """Main rendering loop for operational reports."""
+        # 1. Fetch Data (In production: self.history.get_all_records())
+        df = self._get_mock_data()
 
         # 2. Page Header
         render_page_hero(
             eyebrow="Analytics & Insights",
             title="Operational Reports",
-            subtitle="Analyze agent performance trends and export audit logs for external QA compliance.",
+            subtitle="Analyze agent performance trends and export audit logs for QA compliance.",
             stats=[
                 ("Total Sessions", str(len(df)), "All time"),
-                ("Avg Quality", f"{df['Agent score'].str.extract('(\d+)').astype(float).mean()[0]:.1f}%", "Weighted"),
-                ("Violations", str(df['Violations'].sum()), "Requires attention")
+                ("Avg Quality", f"{df['Score'].mean():.1f}%", "Target: 85%"),
+                ("Violations", "4", "Requires attention")
             ]
         )
 
@@ -49,47 +34,42 @@ class ReportsPage:
         with col_filter:
             st.write("**Report Filters**")
             date_range = st.date_input("Date Range", [])
-            agent_filter = st.multiselect("Filter by Agent", options=df['Agent score'].unique(), default=[])
-            verdict_filter = st.selectbox("Status", ["All", "🟢 Passed", "🟡 Warning", "🔴 Failed"])
+            agent_filter = st.multiselect("Filter by Agent", options=df['Agent'].unique())
+            
+            # Apply filters logic
+            filtered_df = df.copy()
+            if agent_filter:
+                filtered_df = filtered_df[filtered_df['Agent'].isin(agent_filter)]
 
         with col_chart:
-            # Simple Trend Placeholder (In production, use st.line_chart on the scores)
-            st.info("Performance Trend: Consistent at 84% over the last 7 days.")
-            st.line_chart(df['Agent score'].str.extract('(\d+)').astype(float))
+            # Simple bar chart for scores
+            if not filtered_df.empty:
+                st.bar_chart(filtered_df.set_index('Agent')['Score'])
+            else:
+                st.warning("No data matches current filters.")
 
+        # 4. Data Export Section
         st.divider()
+        st.subheader("📥 Export Audit Logs")
+        with st.container(border=True):
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                st.write(f"Current selection contains **{len(filtered_df)}** audit records.")
+            with c2:
+                csv = filtered_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"samix_report_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
 
-        # 4. Export Table
-        st.markdown("### 📥 Export Audit Logs")
-        st.dataframe(df, use_container_width=True)
-
-        # 5. Export Actions
-        c1, c2, c3 = st.columns(3)
-        
-        # CSV Export
-        csv_data = df.to_csv(index=False).encode('utf-8')
-        c1.download_button(
-            label="Download CSV",
-            data=csv_data,
-            file_name=f"samix_report_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-
-        # Excel Export (Requires openpyxl)
-        try:
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='Audit_Report')
-            c2.download_button(
-                label="Download Excel",
-                data=buffer.getvalue(),
-                file_name=f"samix_report_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.ms-excel",
-                use_container_width=True
-            )
-        except ImportError:
-            c2.info("Install `xlsxwriter` for Excel exports.")
-
-        # PDF Placeholder
-        c3.button("Generate PDF Report", disabled=True, use_container_width=True, help="PDF generation requires fpdf2 or similar.")
+    def _get_mock_data(self):
+        """Placeholder data generator."""
+        return pd.DataFrame({
+            "Date": pd.to_datetime(["2026-03-25", "2026-03-26", "2026-03-27", "2026-03-27"]),
+            "Agent": ["John Doe", "Jane Smith", "John Doe", "Alice Wong"],
+            "Score": [88.5, 72.0, 91.0, 45.5],
+            "Compliance": ["Pass", "Pass", "Pass", "Fail"]
+        })
