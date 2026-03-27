@@ -24,3 +24,5 @@ PyYAML
 bcrypt
 openai
 python-jose[cryptography]
+plotly
+passlib
