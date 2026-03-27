@@ -9,20 +9,37 @@ import pandas as pd
 from typing import Optional, Any
 from datetime import datetime
 
-# Core Data Models (Used for local type hinting)
+# Core Data Models
 from src.utils.history_manager import AuditScores, TranscriptTurn, WrongTurn
 
 # ----------------------------------------------------------------------------
-# 1. FIXED IMPORT SECTION (The Bridge)
+# 1. FIXED IMPORT SECTION (The Bridges)
 # ----------------------------------------------------------------------------
 
 def render_hero_section():
-    """Fixes the import error by redirecting to render_page_hero"""
+    """Fixes the import error for hero section"""
     render_page_hero(
         eyebrow="AI AUDITOR",
         title="SamiX Quality Suite",
         subtitle="GenAI-Powered Customer Support Quality Auditor"
     )
+
+def render_metrics_showcase(stats: list[tuple[str, str, str]]):
+    """Fixes the 'no module named render_metrics_showcase' error"""
+    cols = st.columns(len(stats))
+    for i, (label, value, note) in enumerate(stats):
+        with cols[i]:
+            st.markdown(f"""
+                <div style="background: rgba(30, 41, 49, 0.5); border: 1px solid rgba(226, 232, 240, 0.1); padding: 1.25rem; border-radius: 12px;">
+                    <div style="color: #94A3B8; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">{label}</div>
+                    <div style="color: #F8FAFC; font-size: 1.5rem; font-weight: 700;">{value}</div>
+                    <div style="color: #6366F1; font-size: 0.7rem;">{note}</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+# ----------------------------------------------------------------------------
+# 2. Page Foundations
+# ----------------------------------------------------------------------------
 
 def render_page_hero(
     eyebrow: str,
@@ -30,29 +47,19 @@ def render_page_hero(
     subtitle: str,
     stats: Optional[list[tuple[str, str, str]]] = None,
 ) -> None:
-    """Renders a premium SaaS-style hero section with a KPI grid."""
     st.markdown(f"""
         <div style="padding: 2rem 0 1rem 0;">
-            <div style="color: #6366F1; font-weight: 700; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.5rem;">{eyebrow}</div>
-            <h1 style="font-size: 2.75rem; font-weight: 800; color: #F1F5F9; margin-bottom: 0.75rem; letter-spacing: -0.02em;">{title}</h1>
-            <p style="font-size: 1.15rem; color: #94A3B8; max-width: 800px; line-height: 1.6;">{subtitle}</p>
+            <div style="color: #6366F1; font-weight: 700; font-size: 0.85rem; text-transform: uppercase;">{eyebrow}</div>
+            <h1 style="font-size: 2.75rem; font-weight: 800; color: #F1F5F9;">{title}</h1>
+            <p style="font-size: 1.15rem; color: #94A3B8;">{subtitle}</p>
         </div>
     """, unsafe_allow_html=True)
     
     if stats:
-        cols = st.columns(len(stats))
-        for i, (label, value, note) in enumerate(stats):
-            with cols[i]:
-                st.markdown(f"""
-                    <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(226, 232, 240, 0.1); padding: 1.25rem; border-radius: 12px; backdrop-filter: blur(10px);">
-                        <div style="color: #94A3B8; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.25rem;">{label}</div>
-                        <div style="color: #F8FAFC; font-size: 1.5rem; font-weight: 700;">{value}</div>
-                        <div style="color: #6366F1; font-size: 0.7rem; font-weight: 500;">{note}</div>
-                    </div>
-                """, unsafe_allow_html=True)
+        render_metrics_showcase(stats)
 
 # ----------------------------------------------------------------------------
-# 2. Visualization Engines
+# 3. Visualization Engines
 # ----------------------------------------------------------------------------
 
 def render_gauge(value: float, title: str, max_val: float = 10.0) -> None:
@@ -112,7 +119,7 @@ def render_dual_score_chart(scores: Any) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 # ----------------------------------------------------------------------------
-# 3. Session Details
+# 4. Session Details
 # ----------------------------------------------------------------------------
 
 def render_transcript(turns: list[Any], wrong_turns: Optional[list[Any]] = None) -> None:
@@ -140,16 +147,6 @@ def render_transcript(turns: list[Any], wrong_turns: Optional[list[Any]] = None)
             </div>
         """, unsafe_allow_html=True)
 
-        if t_id in wrong_map:
-            wt = wrong_map[t_id]
-            impact = getattr(wt, 'score_impact', wt.get('score_impact', 'Low'))
-            reason = getattr(wt, 'what_went_wrong', wt.get('what_went_wrong', ''))
-            st.markdown(f"""
-                <div style="background: rgba(239, 68, 68, 0.1); border-left: 3px solid #EF4444; padding: 0.5rem 1rem; margin: -0.5rem 0 1rem 0; font-size: 0.85rem; color: #FCA5A5;">
-                    <strong>⚠ Violation:</strong> {impact} — {reason[:100]}...
-                </div>
-            """, unsafe_allow_html=True)
-
 def render_wrong_turns(wrong_turns: list[Any]) -> None:
     if not wrong_turns:
         st.success("✅ No policy violations detected.")
@@ -168,7 +165,7 @@ def render_wrong_turns(wrong_turns: list[Any]) -> None:
             st.caption(f"📚 Source: {source}")
 
 # ----------------------------------------------------------------------------
-# 4. Utilities
+# 5. Utilities
 # ----------------------------------------------------------------------------
 
 def render_cost_card(token_count: int, cost_usd: float) -> None:
