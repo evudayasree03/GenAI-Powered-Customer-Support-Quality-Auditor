@@ -1,12 +1,6 @@
 """
 SamiX FastAPI Backend — Main Application
-
-Endpoints:
-  GET  /              → root check (Fixes Render 404)
-  GET  /health       → system status
-  POST /audit        → full audit pipeline (upload audio → STT → Summarize → RAG → Score)
-  POST /rag/query    → query the knowledge base
-  POST /kb/upload    → upload & index a document into the KB
+Updated for Production Deployment on Render.com
 """
 from __future__ import annotations
 
@@ -17,16 +11,17 @@ import logging
 import uuid
 from pathlib import Path
 
-# Ensure project root is on sys.path so `src.*` imports work
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# Ensure project root is on sys.path so `api.*` imports work correctly on Render
+# If file is in /api/main.py, parent is /api, parent.parent is / (root)
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR.parent))
 
-# Disable HF telemetry
+# Disable HF telemetry and warnings to keep logs clean
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
-# Audioop polyfill
+# Audioop polyfill (needed for some Python 3.11+ environments)
 import audioop
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,12 +64,11 @@ app = FastAPI(
 # Allow Streamlit Cloud and local dev origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in production
+    allow_origins=["*"],  # For production, replace with your specific streamlit URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -88,7 +82,6 @@ def _transcript_to_text(turns) -> str:
         turn_num = getattr(t, "turn", 0)
         lines.append(f"{speaker} [T{turn_num} {timestamp}]: {text}")
     return "\n".join(lines)
-
 
 # ── Endpoints ───────────────────────────────────────────────────────
 
@@ -115,19 +108,10 @@ async def health():
         kb_documents=len(kb.files) + len(kb.generalised_kb),
     )
 
-
 @app.post("/audit", response_model=AuditResponse)
 async def run_audit(
     file: UploadFile = File(...),
 ):
-    """
-    Full audit pipeline:
-      1. Audio → WAV conversion (pydub)
-      2. STT transcription (Deepgram / Whisper)
-      3. Contextual summarization (Groq LLM)
-      4. RAG retrieval (Milvus + BM25 + Reranker)
-      5. Quality scoring with RAG grounding (Groq LLM)
-    """
     session_id = str(uuid.uuid4())[:8]
     filename = file.filename or f"upload_{session_id}.wav"
     file_bytes = await file.read()
@@ -184,13 +168,13 @@ async def run_audit(
             except Exception:
                 pass
 
-        # Cost
+        # Cost calculation
         cost_obj = cost.calculate_session_cost(
             token_count=scoring.token_count,
             audio_duration_sec=duration,
         )
 
-        # Build response
+        # Build response (Scores mapping)
         s = scoring.scores
         return AuditResponse(
             session_id=session_id,
@@ -272,7 +256,6 @@ async def run_audit(
         logger.exception(f"[{session_id}] Audit failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
-
 @app.post("/rag/query", response_model=RAGQueryResponse)
 async def rag_query(req: RAGQueryRequest):
     """Query the RAG knowledge base."""
@@ -299,7 +282,6 @@ async def rag_query(req: RAGQueryRequest):
         groundedness=groundedness,
     )
 
-
 @app.post("/kb/upload", response_model=KBUploadResponse)
 async def kb_upload(
     file: UploadFile = File(...),
@@ -318,14 +300,13 @@ async def kb_upload(
         size_bytes=kbf.size_bytes,
     )
 
-
 # ── Run directly ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "api.main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "10000")),
-        reload=True,
-    )
+    # CRITICAL: Render provides the PORT variable. 
+    # Default to 10000 for standard Render blueprint compliance.
+    port = int(os.environ.get("PORT", 10000))
+    
+    # CRITICAL: Set reload=False for production to avoid worker crashes.
+    uvicorn.run("api.main:app", host="0.0.0.0", port=port, reload=False)
