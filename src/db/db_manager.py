@@ -31,7 +31,7 @@ class DBManager:
             conn.close()
 
     def initialize(self) -> None:
-        schema_path = Path(__file__).with_name("schema.sql")
+        self.db_path = os.path.join(os.getcwd(), "samix.db")
         schema = schema_path.read_text(encoding="utf-8")
         with self._lock, self.connect() as conn:
             conn.executescript(schema)
