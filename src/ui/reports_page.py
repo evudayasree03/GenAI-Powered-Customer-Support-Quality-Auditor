@@ -1,6 +1,7 @@
 """
 SamiX Reports & Analytics
 Provides deep-dive performance metrics and data export capabilities.
+Location: src/ui/reports_page.py
 """
 import streamlit as st
 import pandas as pd
@@ -12,8 +13,18 @@ class ReportsPage:
 
     def render(self) -> None:
         """Main rendering loop for operational reports."""
-        # 1. Fetch Data (In production: self.history.get_all_records())
+        # 1. Fetch Data
         df = self._get_mock_data()
+
+        # --- FIX: Handle Empty Data State ---
+        if not df.empty:
+            avg_score = f"{df['Score'].mean():.1f}%"
+            total_sessions = str(len(df))
+            violations = str(len(df[df['Compliance'] == 'Fail']))
+        else:
+            avg_score = "0.0%"
+            total_sessions = "0"
+            violations = "0"
 
         # 2. Page Header
         render_page_hero(
@@ -21,30 +32,39 @@ class ReportsPage:
             title="Operational Reports",
             subtitle="Analyze agent performance trends and export audit logs for QA compliance.",
             stats=[
-                ("Total Sessions", str(len(df)), "All time"),
-                ("Avg Quality", f"{df['Score'].mean():.1f}%", "Target: 85%"),
-                ("Violations", "4", "Requires attention")
+                ("Total Sessions", total_sessions, "All time"),
+                ("Avg Quality", avg_score, "Target: 85%"),
+                ("Violations", violations, "Requires attention")
             ]
         )
 
         # 3. Filters & Visualization
         st.markdown("### 📊 Performance Overview")
+        
+        if df.empty:
+            st.info("No audit data available yet. Start by running an audit in the Agent Panel.")
+            return
+
         col_filter, col_chart = st.columns([1, 2])
 
         with col_filter:
             st.write("**Report Filters**")
-            date_range = st.date_input("Date Range", [])
-            agent_filter = st.multiselect("Filter by Agent", options=df['Agent'].unique())
+            # Added unique keys to widgets to prevent SessionState conflicts
+            agent_filter = st.multiselect(
+                "Filter by Agent", 
+                options=df['Agent'].unique(),
+                key="report_agent_select"
+            )
             
-            # Apply filters logic
             filtered_df = df.copy()
             if agent_filter:
                 filtered_df = filtered_df[filtered_df['Agent'].isin(agent_filter)]
 
         with col_chart:
-            # Simple bar chart for scores
             if not filtered_df.empty:
-                st.bar_chart(filtered_df.set_index('Agent')['Score'])
+                # Aggregate scores by agent to handle multiple audits per agent
+                chart_data = filtered_df.groupby('Agent')['Score'].mean()
+                st.bar_chart(chart_data)
             else:
                 st.warning("No data matches current filters.")
 
