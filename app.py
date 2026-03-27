@@ -38,6 +38,7 @@ st.set_page_config(
 @st.cache_resource
 def get_api_client():
     """Points to the Render URL defined in Streamlit Secrets or ENV."""
+    # Use 'BACKEND_URL' to match your existing secret name
     url = st.secrets.get("BACKEND_URL") or os.getenv("SAMIX_API_URL", "http://localhost:8000")
     return SamiXClient(base_url=url)
 
@@ -53,8 +54,8 @@ def initialize_session():
         st.session_state.authenticated = False
 
 # 3. Sidebar Branding & Health Status
-def render_sidebar_header(api: SamiXClient, auth: AuthManager):
-    """Renders the logo and real-time backend health check."""
+def render_sidebar_header(api: SamiXClient):
+    """Renders the logo and real-time backend health check in the sidebar."""
     with st.sidebar:
         # Logo Logic
         logo_path = Path("assets/images/logo.png")
@@ -66,27 +67,22 @@ def render_sidebar_header(api: SamiXClient, auth: AuthManager):
         st.markdown('<div style="text-align:center;color:#F8FAFC;font-weight:800;font-size:1.3rem;letter-spacing:-0.02em;">SamiX</div>', unsafe_allow_html=True)
         st.divider()
 
-        # Dynamic Backend Health
+        # Dynamic Backend Health Check
         status = api.health()
         st.markdown('<div style="font-size:.65rem;font-weight:700;color:#64748B;letter-spacing:0.1em;margin-bottom:8px;">BACKEND INFRASTRUCTURE</div>', unsafe_allow_html=True)
         
         if status.get("status") in ["healthy", "online"]:
             st.success("● API Engine Online")
-            # Pull sub-service status if the API provides it
-            if "services" in status:
-                for svc, state in status["services"].items():
-                    color = "#10B981" if state else "#F59E0B"
-                    st.markdown(f'<div style="font-size:.7rem; display:flex; justify-content:space-between;"><span>{svc}</span><span style="color:{color}">●</span></div>', unsafe_allow_html=True)
         else:
             st.warning("● Backend Waking Up...")
-            st.caption("Render services sleep after 15m of inactivity. Please wait 30s.")
+            st.caption("Note: Render Free Tier sleeps after 15m of inactivity.")
 
         st.divider()
         
         # User Info & Logout
-        if st.session_state.authenticated:
-            user_name = st.session_state.get("user_data", {}).get("name", "User")
-            st.markdown(f'<div style="font-size:.8rem; margin-bottom:10px;">User: <b>{user_name}</b></div>', unsafe_allow_html=True)
+        if st.session_state.get("authenticated"):
+            user_data = st.session_state.get("user_data", {})
+            st.markdown(f'<div style="font-size:.8rem; margin-bottom:10px;">User: <b>{user_data.get("name", "Staff")}</b></div>', unsafe_allow_html=True)
             if st.button("Log Out", use_container_width=True, type="secondary"):
                 st.session_state.authenticated = False
                 st.rerun()
@@ -104,28 +100,18 @@ def main() -> None:
 
     # --- ROUTING ---
     if not st.session_state.authenticated:
-        # Show Auth Gateway if not logged in
+        # Show Auth Gateway
         LoginPage(auth).render()
     else:
-        # If logged in, check backend health first
-        health = api.health()
-        
         # Render Sidebar (Health + Brand)
-        render_sidebar_header(api, auth)
+        render_sidebar_header(api)
 
-        # Main Workspace
-        if health.get("status") not in ["healthy", "online", "local"]:
-            st.error("⚠️ Connection to SamiX Backend failed.")
-            st.info("Check your BACKEND_URL in secrets or ensure the Render instance is active.")
-            if st.button("Try Reconnecting"):
-                st.rerun()
-        else:
-            # Launch DashboardPage (Handles role routing internally)
-            dashboard = DashboardPage(
-                history_manager=get_db(),
-                kb_manager=api
-            )
-            dashboard.render()
+        # Launch DashboardPage (Internal Role Handling)
+        dashboard = DashboardPage(
+            history_manager=get_db(),
+            kb_manager=api
+        )
+        dashboard.render()
 
 if __name__ == "__main__":
     main()
